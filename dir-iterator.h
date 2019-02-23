@@ -19,7 +19,7 @@
  * A typical iteration looks like this:
  *
  *     int ok;
- *     struct iterator *iter = dir_iterator_begin(path);
+ *     struct iterator *iter = dir_iterator_begin(path, 0);
  *
  *     while ((ok = dir_iterator_advance(iter)) == ITER_OK) {
  *             if (want_to_stop_iteration()) {
@@ -65,9 +65,15 @@ struct dir_iterator {
  * The iteration includes all paths under path, not including path
  * itself and not including "." or ".." entries.
  *
- * path is the starting directory. An internal copy will be made.
+ * Parameters are:
+ * - path is the starting directory. An internal copy will be made.
+ * - pedantic is a boolean value. If true, dir-iterator will free
+ *   resources and return ITER_ERROR immediately, in case of an error
+ *   while trying to fetch the next entry in dir_iterator_advance. If
+ *   false, it will just emit a warning and keep looking for the next
+ *   entry.
  */
-struct dir_iterator *dir_iterator_begin(const char *path);
+struct dir_iterator *dir_iterator_begin(const char *path, int pedantic);
 
 /*
  * Advance the iterator to the first or next item and return ITER_OK.
@@ -76,6 +82,10 @@ struct dir_iterator *dir_iterator_begin(const char *path);
  * dir_iterator and associated resources and return ITER_ERROR. It is
  * a bug to use iterator or call this function again after it has
  * returned ITER_DONE or ITER_ERROR.
+ *
+ * Note that whether dir_iterator_advance will return ITER_ERROR when
+ * failing to fetch the next entry or keep going is defined by the
+ * 'pedantic' option at dir-iterator's initialization.
  */
 int dir_iterator_advance(struct dir_iterator *iterator);
 
