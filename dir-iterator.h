@@ -19,7 +19,8 @@
  * A typical iteration looks like this:
  *
  *     int ok;
- *     struct iterator *iter = dir_iterator_begin(path);
+ *     unsigned flags = DIR_ITERATOR_PEDANTIC;
+ *     struct iterator *iter = dir_iterator_begin(path, flags);
  *
  *     while ((ok = dir_iterator_advance(iter)) == ITER_OK) {
  *             if (want_to_stop_iteration()) {
@@ -40,6 +41,20 @@
  * dir_iterator_advance() again.
  */
 
+/*
+ * Flags for dir_iterator_begin:
+ *
+ * - DIR_ITERATOR_PEDANTIC: override dir-iterator's default behavior
+ *   in case of an error at dir_iterator_advance(), which is to emit
+ *   a warning and keep going. With this flag, resouces are freed and
+ *   ITER_ERROR is returned immediately.
+ *
+ * - DIR_ITERATOR_FOLLOW_SYMLINKS: make dir-iterator follow symlinks to
+ *   directories, i.e., iterate over linked directories' contents.
+ */
+#define DIR_ITERATOR_PEDANTIC (1 << 0)
+#define DIR_ITERATOR_FOLLOW_SYMLINKS (1 << 1)
+
 struct dir_iterator {
 	/* The current path: */
 	struct strbuf path;
@@ -54,28 +69,37 @@ struct dir_iterator {
 	/* The current basename: */
 	const char *basename;
 
-	/* The result of calling lstat() on path: */
+	/*
+	 * The result of calling lstat() on path or stat(), if the
+	 * DIR_ITERATOR_FOLLOW_SYMLINKS flag was set at
+	 * dir_iterator's initialization.
+	 */
 	struct stat st;
 };
 
 /*
- * Start a directory iteration over path. Return a dir_iterator that
- * holds the internal state of the iteration.
+ * Start a directory iteration over path with the combination of
+ * options specified by flags. Return a dir_iterator that holds the
+ * internal state of the iteration.
  *
  * The iteration includes all paths under path, not including path
  * itself and not including "." or ".." entries.
  *
- * path is the starting directory. An internal copy will be made.
+ * Parameters are:
+ *  - path is the starting directory. An internal copy will be made.
+ *  - flags is a combination of the possible flags to initialize a
+ *    dir-iterator or 0 for default behaviour.
  */
-struct dir_iterator *dir_iterator_begin(const char *path);
+struct dir_iterator *dir_iterator_begin(const char *path, unsigned flags);
 
 /*
  * Advance the iterator to the first or next item and return ITER_OK.
  * If the iteration is exhausted, free the dir_iterator and any
- * resources associated with it and return ITER_DONE. On error, free
- * dir_iterator and associated resources and return ITER_ERROR. It is
- * a bug to use iterator or call this function again after it has
- * returned ITER_DONE or ITER_ERROR.
+ * resources associated with it and return ITER_DONE.
+ *
+ * It is a bug to use iterator or call this function again after it
+ * has returned ITER_DONE or ITER_ERROR (which may be returned iff
+ * the DIR_ITERATOR_PEDANTIC flag was set).
  */
 int dir_iterator_advance(struct dir_iterator *iterator);
 
