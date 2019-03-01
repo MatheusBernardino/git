@@ -415,6 +415,7 @@ static void mkdir_if_missing(const char *pathname, mode_t mode)
 static void copy_or_link_directory(struct strbuf *src, struct strbuf *dest,
 				   const char *src_repo)
 {
+	struct stat lbuf;
 	int src_len, dest_len;
 	struct dir_iterator *iter;
 	int iter_status;
@@ -440,6 +441,10 @@ static void copy_or_link_directory(struct strbuf *src, struct strbuf *dest,
 			mkdir_if_missing(dest->buf, 0777);
 			continue;
 		}
+		if (lstat(src->buf, &lbuf)) {
+			die_errno(_("failed to lstat %s\n"), src->buf);
+			continue;
+		}
 
 		/* Files that cannot be copied bit-for-bit... */
 		if (!strcmp(iter->relative_path, "info/alternates")) {
@@ -450,8 +455,19 @@ static void copy_or_link_directory(struct strbuf *src, struct strbuf *dest,
 		if (unlink(dest->buf) && errno != ENOENT)
 			die_errno(_("failed to unlink '%s'"), dest->buf);
 		if (!option_no_hardlinks) {
-			if (!link(src->buf, dest->buf))
+			if (S_ISLNK(lbuf.st_mode)){
+				struct strbuf lnk = STRBUF_INIT;
+				if (strbuf_readlink(&lnk, src->buf, lbuf.st_size))
+					die_errno(_("cannot readlink '%s'"), src->buf);
+				if (!symlink(lnk.buf, dest->buf)) {
+					strbuf_release(&lnk);
+					continue;
+				}
+				strbuf_release(&lnk);
+
+			} else if (!link(src->buf, dest->buf)) {
 				continue;
+			}
 			if (option_local > 0)
 				die_errno(_("failed to create link '%s'"), dest->buf);
 			option_no_hardlinks = 1;
