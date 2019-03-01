@@ -397,6 +397,7 @@ static void copy_or_link_directory(struct strbuf *src, struct strbuf *dest,
 {
 	struct dirent *de;
 	struct stat buf;
+	struct stat lbuf;
 	int src_len, dest_len;
 	DIR *dir;
 
@@ -427,6 +428,10 @@ static void copy_or_link_directory(struct strbuf *src, struct strbuf *dest,
 			warning (_("failed to stat %s\n"), src->buf);
 			continue;
 		}
+		if (lstat(src->buf, &lbuf)) {
+			warning (_("failed to lstat %s\n"), src->buf);
+			continue;
+		}
 		if (S_ISDIR(buf.st_mode)) {
 			if (de->d_name[0] != '.')
 				copy_or_link_directory(src, dest,
@@ -443,8 +448,19 @@ static void copy_or_link_directory(struct strbuf *src, struct strbuf *dest,
 		if (unlink(dest->buf) && errno != ENOENT)
 			die_errno(_("failed to unlink '%s'"), dest->buf);
 		if (!option_no_hardlinks) {
-			if (!link(src->buf, dest->buf))
+			if (S_ISLNK(lbuf.st_mode)){
+				struct strbuf lnk = STRBUF_INIT;
+				if (strbuf_readlink(&lnk, src->buf, lbuf.st_size))
+					die_errno(_("cannot readlink '%s'"), src->buf);
+				if (!symlink(lnk.buf, dest->buf)) {
+					strbuf_release(&lnk);
+					continue;
+				}
+				strbuf_release(&lnk);
+
+			} else if (!link(src->buf, dest->buf)) {
 				continue;
+			}
 			if (option_local > 0)
 				die_errno(_("failed to create link '%s'"), dest->buf);
 			option_no_hardlinks = 1;
