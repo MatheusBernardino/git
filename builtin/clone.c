@@ -443,7 +443,10 @@ static void copy_or_link_directory(struct strbuf *src, struct strbuf *dest,
 		if (unlink(dest->buf) && errno != ENOENT)
 			die_errno(_("failed to unlink '%s'"), dest->buf);
 		if (!option_no_hardlinks) {
-			if (!link(src->buf, dest->buf))
+			char *resolved_path = real_pathdup(src->buf, 1);
+			int status = link(resolved_path, dest->buf);
+			free(resolved_path);
+			if (!status)
 				continue;
 			if (option_local > 0)
 				die_errno(_("failed to create link '%s'"), dest->buf);
