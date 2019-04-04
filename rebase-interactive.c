@@ -85,6 +85,9 @@ int edit_todo_list(struct repository *r, unsigned flags)
 	if (launch_sequence_editor(todo_file, NULL, NULL))
 		return -1;
 
+	if (check_todo_list(r))
+		return -1;
+
 	transform_todos(r, flags & ~(TODO_LIST_SHORTEN_IDS));
 
 	return 0;
