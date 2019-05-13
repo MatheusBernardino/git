@@ -62,3 +62,8 @@ rebase.rescheduleFailedExec::
 	Automatically reschedule `exec` commands that failed. This only makes
 	sense in interactive mode (or when an `--exec` option was provided).
 	This is the same as specifying the `--reschedule-failed-exec` option.
+
+rebase.verboseCommit::
+	When rewording or squashing commits, during an interactive rebase, show
+	the commits' diff to help describe the modifications they bring. False
+	by default.

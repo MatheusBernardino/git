@@ -1477,4 +1477,60 @@ test_expect_success 'valid author header when author contains single quote' '
 	test_cmp expected actual
 '
 
+write_script "reword-and-check-for-diff" <<\EOF &&
+case "$1" in
+*/git-rebase-todo)
+	sed s/pick/reword/ "$1" > "$1.tmp"
+	mv -f "$1.tmp" "$1"
+	;;
+*)
+	grep '^diff --git' "$1" >has-diff
+	;;
+esac
+exit 0
+EOF
+
+test_expect_success 'rebase -i does not show diff by default when rewording' '
+	rebase_setup_and_clean no-verbose-commit-reword &&
+	test_set_editor "$PWD/reword-and-check-for-diff" &&
+	git rebase -i HEAD~1 &&
+	test_line_count = 0 has-diff
+'
+
+test_expect_success 'rebase -i respects rebase.verboseCommit when rewording' '
+	rebase_setup_and_clean verbose-commit-reword &&
+	test_config rebase.verboseCommit true &&
+	test_set_editor "$PWD/reword-and-check-for-diff" &&
+	git rebase -i HEAD~1 &&
+	test_line_count -gt 0 has-diff
+'
+
+write_script "squash-and-check-for-diff" <<\EOF &&
+case "$1" in
+*/git-rebase-todo)
+	sed "s/pick \([0-9a-f]*\) E/squash \1 E/" "$1" > "$1.tmp"
+	mv -f "$1.tmp" "$1"
+	;;
+*)
+	grep '^diff --git' "$1" >has-diff
+	;;
+esac
+exit 0
+EOF
+
+test_expect_success 'rebase -i does not show diff by default when squashing' '
+	rebase_setup_and_clean no-verbose-commit-squash &&
+	test_set_editor "$PWD/squash-and-check-for-diff" &&
+	git rebase -i HEAD~2 &&
+	test_line_count = 0 has-diff
+'
+
+test_expect_success 'rebase -i respects rebase.verboseCommit when squashing' '
+	rebase_setup_and_clean verbose-commit-squash &&
+	test_config rebase.verboseCommit true &&
+	test_set_editor "$PWD/squash-and-check-for-diff" &&
+	git rebase -i HEAD~2 &&
+	test_line_count -gt 0 has-diff
+'
+
 test_done

@@ -914,6 +914,7 @@ N_("you have staged changes in your working tree\n"
 #define CLEANUP_MSG (1<<3)
 #define VERIFY_MSG  (1<<4)
 #define CREATE_ROOT_COMMIT (1<<5)
+#define VERBOSE_COMMIT (1<<6)
 
 static int run_command_silent_on_success(struct child_process *cmd)
 {
@@ -1007,6 +1008,8 @@ static int run_git_commit(struct repository *r,
 		argv_array_push(&cmd.args, "-n");
 	if ((flags & AMEND_MSG))
 		argv_array_push(&cmd.args, "--amend");
+	if ((flags & VERBOSE_COMMIT))
+		argv_array_push(&cmd.args, "-v");
 	if (opts->gpg_sign)
 		argv_array_pushf(&cmd.args, "-S%s", opts->gpg_sign);
 	if (defmsg)
@@ -1782,7 +1785,7 @@ static int do_pick_commit(struct repository *r,
 	char *author = NULL;
 	struct commit_message msg = { NULL, NULL, NULL, NULL };
 	struct strbuf msgbuf = STRBUF_INIT;
-	int res, unborn = 0, allow;
+	int res, unborn = 0, allow, verbose_commit = 0;
 
 	if (opts->no_commit) {
 		/*
@@ -1843,6 +1846,9 @@ static int do_pick_commit(struct repository *r,
 		return error(_("cannot get commit message for %s"),
 			oid_to_hex(&commit->object.oid));
 
+	if (git_config_get_maybe_bool("rebase.verbosecommit", &verbose_commit) < 0)
+		warning("Invalid value for rebase.verboseCommit. Using 'false' instead.");
+
 	if (opts->allow_ff && !is_fixup(command) &&
 	    ((parent && oideq(&parent->object.oid, &head)) ||
 	     (!parent && unborn))) {
@@ -1853,6 +1859,8 @@ static int do_pick_commit(struct repository *r,
 		if (res || command != TODO_REWORD)
 			goto leave;
 		flags |= EDIT_MSG | AMEND_MSG | VERIFY_MSG;
+		if (verbose_commit)
+			flags |= VERBOSE_COMMIT;
 		msg_file = NULL;
 		goto fast_forward_edit;
 	}
@@ -1909,12 +1917,17 @@ static int do_pick_commit(struct repository *r,
 			author = get_author(msg.message);
 	}
 
-	if (command == TODO_REWORD)
+	if (command == TODO_REWORD) {
 		flags |= EDIT_MSG | VERIFY_MSG;
+		if (verbose_commit)
+			flags |= VERBOSE_COMMIT;
+	}
 	else if (is_fixup(command)) {
 		if (update_squash_messages(r, command, commit, opts))
 			return -1;
 		flags |= AMEND_MSG;
+		if (verbose_commit)
+			flags |= VERBOSE_COMMIT;
 		if (!final_fixup)
 			msg_file = rebase_path_squash_msg();
 		else if (file_exists(rebase_path_fixup_msg())) {
