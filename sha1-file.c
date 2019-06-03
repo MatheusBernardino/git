@@ -411,9 +411,9 @@ out:
 
 static void fill_loose_path(struct strbuf *buf, const struct object_id *oid)
 {
+	const char hex[] = "0123456789abcdef";
 	int i;
 	for (i = 0; i < the_hash_algo->rawsz; i++) {
-		static char hex[] = "0123456789abcdef";
 		unsigned int val = oid->hash[i];
 		strbuf_addch(buf, hex[val >> 4]);
 		strbuf_addch(buf, hex[val & 0xf]);
@@ -796,9 +796,12 @@ static int check_and_freshen_odb(struct object_directory *odb,
 				 const struct object_id *oid,
 				 int freshen)
 {
-	static struct strbuf path = STRBUF_INIT;
+	int ret;
+	struct strbuf path = STRBUF_INIT;
 	odb_loose_path(odb, &path, oid);
-	return check_and_freshen_file(path.buf, freshen);
+	ret = check_and_freshen_file(path.buf, freshen);
+	strbuf_release(&path);
+	return ret;
 }
 
 static int check_and_freshen_local(const struct object_id *oid, int freshen)
@@ -952,28 +955,33 @@ int git_open_cloexec(const char *name, int flags)
  * Returns 0 on success, negative on failure.
  *
  * The "path" out-parameter will give the path of the object we found (if any).
- * Note that it may point to static storage and is only valid until another
- * call to stat_loose_object().
+ * It should be freed by the caller, on success.
  */
 static int stat_loose_object(struct repository *r, const struct object_id *oid,
 			     struct stat *st, const char **path)
 {
 	struct object_directory *odb;
-	static struct strbuf buf = STRBUF_INIT;
+	struct strbuf buf = STRBUF_INIT;
 
 	prepare_alt_odb(r);
 	for (odb = r->objects->odb; odb; odb = odb->next) {
-		*path = odb_loose_path(odb, &buf, oid);
-		if (!lstat(*path, st))
+		odb_loose_path(odb, &buf, oid);
+		if (!lstat(buf.buf, st)) {
+			*path = strbuf_detach(&buf, NULL);
 			return 0;
+		}
 	}
 
+	strbuf_release(&buf);
 	return -1;
 }
 
 /*
  * Like stat_loose_object(), but actually open the object and return the
- * descriptor. See the caveats on the "path" parameter above.
+ * descriptor.
+ *
+ * Note: *path should be freed by the caller if the function returned
+ * successfully.
  */
 static int open_loose_object(struct repository *r,
 			     const struct object_id *oid, const char **path)
@@ -981,18 +989,21 @@ static int open_loose_object(struct repository *r,
 	int fd;
 	struct object_directory *odb;
 	int most_interesting_errno = ENOENT;
-	static struct strbuf buf = STRBUF_INIT;
+	struct strbuf buf = STRBUF_INIT;
 
 	prepare_alt_odb(r);
 	for (odb = r->objects->odb; odb; odb = odb->next) {
-		*path = odb_loose_path(odb, &buf, oid);
-		fd = git_open(*path);
-		if (fd >= 0)
+		odb_loose_path(odb, &buf, oid);
+		fd = git_open(buf.buf);
+		if (fd >= 0) {
+			*path = strbuf_detach(&buf, NULL);
 			return fd;
+		}
 
 		if (most_interesting_errno == ENOENT)
 			most_interesting_errno = errno;
 	}
+	strbuf_release(&buf);
 	errno = most_interesting_errno;
 	return -1;
 }
@@ -1017,14 +1028,18 @@ static int quick_has_loose(struct repository *r,
 static void *map_loose_object_1(struct repository *r, const char *path,
 			     const struct object_id *oid, unsigned long *size)
 {
-	void *map;
+	void *map = NULL;
 	int fd;
+	int path_given;
 
-	if (path)
+	if (path) {
 		fd = git_open(path);
-	else
+		path_given = 1;
+	} else {
 		fd = open_loose_object(r, oid, &path);
-	map = NULL;
+		path_given = 0;
+	}
+
 	if (fd >= 0) {
 		struct stat st;
 
@@ -1033,13 +1048,16 @@ static void *map_loose_object_1(struct repository *r, const char *path,
 			if (!*size) {
 				/* mmap() is forbidden on empty files */
 				error(_("object file %s is empty"), path);
-				close(fd);
-				return NULL;
+				goto clean;
 			}
 			map = xmmap(NULL, *size, PROT_READ, MAP_PRIVATE, fd, 0);
 		}
+clean:
 		close(fd);
+		if (!path_given)
+			free((char *) path);
 	}
+
 	return map;
 }
 
@@ -1268,6 +1286,7 @@ static int loose_object_info(struct repository *r,
 			return quick_has_loose(r, oid) ? 0 : -1;
 		if (stat_loose_object(r, oid, &st, &path) < 0)
 			return -1;
+		free((char *) path);
 		if (oi->disk_sizep)
 			*oi->disk_sizep = st.st_size;
 		return 0;
@@ -1323,7 +1342,7 @@ int fetch_if_missing = 1;
 int oid_object_info_extended(struct repository *r, const struct object_id *oid,
 			     struct object_info *oi, unsigned flags)
 {
-	static struct object_info blank_oi = OBJECT_INFO_INIT;
+	struct object_info blank_oi = OBJECT_INFO_INIT;
 	struct pack_entry e;
 	int rtype;
 	const struct object_id *real = oid;
@@ -1686,22 +1705,23 @@ static int write_loose_object(const struct object_id *oid, char *hdr,
 			      int hdrlen, const void *buf, unsigned long len,
 			      time_t mtime)
 {
-	int fd, ret;
+	int fd, ret, deflate_status;
 	unsigned char compressed[4096];
 	git_zstream stream;
 	git_hash_ctx c;
 	struct object_id parano_oid;
-	static struct strbuf tmp_file = STRBUF_INIT;
-	static struct strbuf filename = STRBUF_INIT;
+	struct strbuf tmp_file = STRBUF_INIT;
+	struct strbuf filename = STRBUF_INIT;
 
 	loose_object_path(the_repository, &filename, oid);
 
 	fd = create_tmpfile(&tmp_file, filename.buf);
 	if (fd < 0) {
 		if (errno == EACCES)
-			return error(_("insufficient permission for adding an object to repository database %s"), get_object_directory());
+			ret = error(_("insufficient permission for adding an object to repository database %s"), get_object_directory());
 		else
-			return error_errno(_("unable to create temporary file"));
+			ret = error_errno(_("unable to create temporary file"));
+		goto out;
 	}
 
 	/* Set it up */
@@ -1722,21 +1742,21 @@ static int write_loose_object(const struct object_id *oid, char *hdr,
 	stream.avail_in = len;
 	do {
 		unsigned char *in0 = stream.next_in;
-		ret = git_deflate(&stream, Z_FINISH);
+		deflate_status = git_deflate(&stream, Z_FINISH);
 		the_hash_algo->update_fn(&c, in0, stream.next_in - in0);
 		if (write_buffer(fd, compressed, stream.next_out - compressed) < 0)
 			die(_("unable to write loose object file"));
 		stream.next_out = compressed;
 		stream.avail_out = sizeof(compressed);
-	} while (ret == Z_OK);
+	} while (deflate_status == Z_OK);
 
-	if (ret != Z_STREAM_END)
+	if (deflate_status != Z_STREAM_END)
 		die(_("unable to deflate new object %s (%d)"), oid_to_hex(oid),
-		    ret);
-	ret = git_deflate_end_gently(&stream);
-	if (ret != Z_OK)
+		    deflate_status);
+	deflate_status = git_deflate_end_gently(&stream);
+	if (deflate_status != Z_OK)
 		die(_("deflateEnd on object %s failed (%d)"), oid_to_hex(oid),
-		    ret);
+		    deflate_status);
 	the_hash_algo->final_fn(parano_oid.hash, &c);
 	if (!oideq(oid, &parano_oid))
 		die(_("confused by unstable object source data for %s"),
@@ -1752,7 +1772,12 @@ static int write_loose_object(const struct object_id *oid, char *hdr,
 			warning_errno(_("failed utime() on %s"), tmp_file.buf);
 	}
 
-	return finalize_object_file(tmp_file.buf, filename.buf);
+	ret = finalize_object_file(tmp_file.buf, filename.buf);
+
+out:
+	strbuf_release(&tmp_file);
+	strbuf_release(&filename);
+	return ret;
 }
 
 static int freshen_loose_object(const struct object_id *oid)
