@@ -169,7 +169,7 @@ static char *get_tag_body(const struct object_id *oid)
 	unsigned long size;
 	enum object_type type;
 	char *buf, *sp, *tag_body;
-	size_t tag_body_size;
+	size_t tag_body_size, signature_offset;
 
 	buf = read_object_file(oid, &type, &size);
 	if (!buf)
@@ -182,12 +182,15 @@ static char *get_tag_body(const struct object_id *oid)
 		return NULL;
 	}
 	sp += 2; /* skip the 2 LFs */
-	sp += parse_signature(sp, buf + size - sp);
+	signature_offset = parse_signature(sp, buf + size - sp);
+	if (sp[signature_offset])
+		sp += signature_offset;
 
 	/* detach sp from buf */
 	tag_body_size = (strlen(sp) + 1) * sizeof(char);
 	tag_body = xmalloc(tag_body_size);
 	xsnprintf(tag_body, tag_body_size, "%s", sp);
+
 	free(buf);
 	return tag_body;
 }
@@ -215,6 +218,7 @@ static int build_tag_object(struct strbuf *buf, int sign, struct object_id *resu
 struct create_tag_options {
 	unsigned int message_given:1;
 	unsigned int use_editor:1;
+	unsigned int force_editor:1;
 	unsigned int sign;
 	enum {
 		CLEANUP_NONE,
@@ -289,13 +293,21 @@ static void create_tag(const struct object_id *object, const char *object_ref,
 		    tag,
 		    git_committer_info(IDENT_STRICT));
 
-	if (!opt->message_given || opt->use_editor) {
+	if (opt->force_editor && !opt->message_given && is_null_oid(prev) &&
+	    !opt->use_editor) {
+		die(_("no tag message?"));
+	} else if ((!opt->force_editor && !opt->message_given && is_null_oid(prev))
+		  || (opt->force_editor && opt->use_editor)) {
+		/* Editor must be opened */
 		prepare_tag_template(buf, opt, prev, path, tag);
 		if (launch_editor(path, buf, NULL)) {
 			fprintf(stderr,
 			_("Please supply the message using either -m or -F option.\n"));
 			exit(1);
 		}
+	} else if (!opt->message_given) {
+		/* Tag already exists and user doesn't want to change it */
+		strbuf_addstr(buf, get_tag_body(prev));
 	}
 
 	if (opt->cleanup_mode != CLEANUP_NONE)
@@ -418,7 +430,7 @@ int cmd_tag(int argc, const char **argv, const char *prefix)
 	static struct ref_sorting *sorting = NULL, **sorting_tail = &sorting;
 	struct ref_format format = REF_FORMAT_INIT;
 	int icase = 0;
-	int edit_flag = 0;
+	int edit_flag = -1;
 	struct option options[] = {
 		OPT_CMDMODE('l', "list", &cmdmode, N_("list tag names"), 'l'),
 		{ OPTION_INTEGER, 'n', NULL, &filter.lines, N_("n"),
@@ -570,7 +582,8 @@ int cmd_tag(int argc, const char **argv, const char *prefix)
 		die(_("tag '%s' already exists"), tag);
 
 	opt.message_given = msg.given || msgfile;
-	opt.use_editor = edit_flag;
+	opt.force_editor = edit_flag >= 0;
+	opt.use_editor = opt.force_editor ? edit_flag : 0;
 
 	if (!cleanup_arg || !strcmp(cleanup_arg, "strip"))
 		opt.cleanup_mode = CLEANUP_ALL;
