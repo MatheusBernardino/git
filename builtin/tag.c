@@ -229,6 +229,40 @@ static const char message_advice_nested_tag[] =
 	   "\n"
 	   "\tgit tag -f %s %s^{}");
 
+static void prepare_tag_template(struct strbuf *given_msg,
+				 struct create_tag_options *opt,
+				 struct object_id *prev, char *path,
+				 const char *tag)
+{
+       int fd;
+
+       /* write the template message before editing: */
+	fd = open(path, O_CREAT | O_TRUNC | O_WRONLY, 0600);
+	if (fd < 0)
+		die_errno(_("could not create file '%s'"), path);
+
+	if (opt->message_given) {
+		write_or_die(fd, given_msg->buf, given_msg->len);
+		strbuf_reset(given_msg);
+	} else if (!is_null_oid(prev)) {
+		write_tag_body(fd, prev);
+	} else {
+		struct strbuf template = STRBUF_INIT;
+		strbuf_addch(&template, '\n');
+		if (opt->cleanup_mode == CLEANUP_ALL) {
+			strbuf_commented_addf(&template, _(tag_template), tag,
+					      comment_line_char);
+		} else {
+			strbuf_commented_addf(&template,
+					      _(tag_template_nocleanup), tag,
+					      comment_line_char);
+		}
+		write_or_die(fd, template.buf, template.len);
+		strbuf_release(&template);
+	}
+	close(fd);
+}
+
 static void create_tag(const struct object_id *object, const char *object_ref,
 			const char *tag,
 			struct strbuf *buf, struct create_tag_options *opt,
@@ -236,7 +270,7 @@ static void create_tag(const struct object_id *object, const char *object_ref,
 {
 	enum object_type type;
 	struct strbuf header = STRBUF_INIT;
-	char *path = NULL;
+	char *path = git_pathdup("TAG_EDITMSG");
 
 	type = oid_object_info(the_repository, object, NULL);
 	if (type <= OBJ_NONE)
@@ -256,31 +290,7 @@ static void create_tag(const struct object_id *object, const char *object_ref,
 		    git_committer_info(IDENT_STRICT));
 
 	if (!opt->message_given || opt->use_editor) {
-		int fd;
-
-		/* write the template message before editing: */
-		path = git_pathdup("TAG_EDITMSG");
-		fd = open(path, O_CREAT | O_TRUNC | O_WRONLY, 0600);
-		if (fd < 0)
-			die_errno(_("could not create file '%s'"), path);
-
-		if (opt->message_given) {
-			write_or_die(fd, buf->buf, buf->len);
-			strbuf_reset(buf);
-		} else if (!is_null_oid(prev)) {
-			write_tag_body(fd, prev);
-		} else {
-			struct strbuf buf = STRBUF_INIT;
-			strbuf_addch(&buf, '\n');
-			if (opt->cleanup_mode == CLEANUP_ALL)
-				strbuf_commented_addf(&buf, _(tag_template), tag, comment_line_char);
-			else
-				strbuf_commented_addf(&buf, _(tag_template_nocleanup), tag, comment_line_char);
-			write_or_die(fd, buf.buf, buf.len);
-			strbuf_release(&buf);
-		}
-		close(fd);
-
+		prepare_tag_template(buf, opt, prev, path, tag);
 		if (launch_editor(path, buf, NULL)) {
 			fprintf(stderr,
 			_("Please supply the message using either -m or -F option.\n"));
