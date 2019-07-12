@@ -164,26 +164,43 @@ static int git_tag_config(const char *var, const char *value, void *cb)
 	return git_color_default_config(var, value, cb);
 }
 
-static void write_tag_body(int fd, const struct object_id *oid)
+static char *get_tag_body(const struct object_id *oid)
 {
 	unsigned long size;
 	enum object_type type;
-	char *buf, *sp;
+	char *buf, *sp, *tag_body;
+	size_t tag_body_size;
 
 	buf = read_object_file(oid, &type, &size);
 	if (!buf)
-		return;
+		return NULL;
 	/* skip header */
 	sp = strstr(buf, "\n\n");
 
 	if (!sp || !size || type != OBJ_TAG) {
 		free(buf);
-		return;
+		return NULL;
 	}
 	sp += 2; /* skip the 2 LFs */
-	write_or_die(fd, sp, parse_signature(sp, buf + size - sp));
+	sp += parse_signature(sp, buf + size - sp);
 
+	/* detach sp from buf */
+	tag_body_size = (strlen(sp) + 1) * sizeof(char);
+	tag_body = xmalloc(tag_body_size);
+	xsnprintf(tag_body, tag_body_size, "%s", sp);
 	free(buf);
+	return tag_body;
+}
+
+static void write_tag_body(int fd, const struct object_id *oid)
+{
+	const char *tag_body = get_tag_body(oid);
+
+	if (!tag_body) {
+		warning("failed to get tag body for %s", oid->hash);
+		return;
+	}
+	write_or_die(fd, tag_body, strlen(tag_body) * sizeof(char));
 }
 
 static int build_tag_object(struct strbuf *buf, int sign, struct object_id *result)
@@ -213,9 +230,9 @@ static const char message_advice_nested_tag[] =
 	   "\tgit tag -f %s %s^{}");
 
 static void create_tag(const struct object_id *object, const char *object_ref,
-		       const char *tag,
-		       struct strbuf *buf, struct create_tag_options *opt,
-		       struct object_id *prev, struct object_id *result)
+			const char *tag,
+			struct strbuf *buf, struct create_tag_options *opt,
+			struct object_id *prev, struct object_id *result)
 {
 	enum object_type type;
 	struct strbuf header = STRBUF_INIT;
@@ -572,7 +589,7 @@ int cmd_tag(int argc, const char **argv, const char *prefix)
 	ref_transaction_free(transaction);
 	if (force && !is_null_oid(&prev) && !oideq(&prev, &object))
 		printf(_("Updated tag '%s' (was %s)\n"), tag,
-		       find_unique_abbrev(&prev, DEFAULT_ABBREV));
+			find_unique_abbrev(&prev, DEFAULT_ABBREV));
 
 	UNLEAK(buf);
 	UNLEAK(ref);
