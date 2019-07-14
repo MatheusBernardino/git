@@ -1500,6 +1500,10 @@ int df_name_compare(const char *name1, int len1, int mode1, const char *name2, i
 int name_compare(const char *name1, size_t len1, const char *name2, size_t len2);
 int cache_name_stage_compare(const char *name1, int len1, int stage1, const char *name2, int len2, int stage2);
 
+void init_obj_read_mutex(void);
+void obj_read_lock(void);
+void obj_read_unlock(void);
+
 void *read_object_with_reference(const struct object_id *oid,
 				 const char *required_type,
 				 unsigned long *size,

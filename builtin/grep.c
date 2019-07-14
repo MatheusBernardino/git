@@ -926,6 +926,7 @@ int cmd_grep(int argc, const char **argv, const char *prefix)
 		OPT_END()
 	};
 
+	init_obj_read_mutex();
 	init_grep_defaults(the_repository);
 	git_config(grep_cmd_config, NULL);
 	grep_init(&opt, the_repository, prefix);
@@ -1058,7 +1059,7 @@ int cmd_grep(int argc, const char **argv, const char *prefix)
 	pathspec.recursive = 1;
 	pathspec.recurse_submodules = !!recurse_submodules;
 
-	if (list.nr || cached || show_in_pager) {
+	if (show_in_pager) {
 		if (num_threads > 1)
 			warning(_("invalid option combination, ignoring --threads"));
 		num_threads = 1;

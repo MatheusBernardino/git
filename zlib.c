@@ -112,6 +112,7 @@ int git_inflate(git_zstream *strm, int flush)
 {
 	int status;
 
+	obj_read_unlock();
 	for (;;) {
 		zlib_pre_call(strm);
 		/* Never say Z_FINISH unless we are feeding everything */
@@ -131,6 +132,7 @@ int git_inflate(git_zstream *strm, int flush)
 			continue;
 		break;
 	}
+	obj_read_lock();
 
 	switch (status) {
 	/* Z_BUF_ERROR: normal, needs more space in the output buffer */

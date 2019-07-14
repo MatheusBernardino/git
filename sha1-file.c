@@ -1463,6 +1463,24 @@ int pretend_object_file(void *buf, unsigned long len, enum object_type type,
 	return 0;
 }
 
+static pthread_mutex_t obj_read_mutex;
+
+void init_obj_read_mutex(void)
+{
+	if (pthread_mutex_init(&obj_read_mutex, NULL))
+		die("Failed to initialize mutex\n");
+}
+
+void obj_read_lock(void)
+{
+	pthread_mutex_lock(&obj_read_mutex);
+}
+
+void obj_read_unlock(void)
+{
+	pthread_mutex_unlock(&obj_read_mutex);
+}
+
 /*
  * This function dies on corrupt objects; the callers who want to
  * deal with them should arrange to call read_object() and give error
@@ -1478,13 +1496,18 @@ void *read_object_file_extended(struct repository *r,
 	const struct packed_git *p;
 	const char *path;
 	struct stat st;
-	const struct object_id *repl = lookup_replace ?
-		lookup_replace_object(r, oid) : oid;
+	const struct object_id *repl;
+
+	obj_read_lock();
+
+	repl = lookup_replace ? lookup_replace_object(r, oid) : oid;
 
 	errno = 0;
 	data = read_object(r, repl, type, size);
-	if (data)
+	if (data) {
+		obj_read_unlock();
 		return data;
+	}
 
 	if (errno && errno != ENOENT)
 		die_errno(_("failed to read object %s"), oid_to_hex(oid));
@@ -1502,6 +1525,7 @@ void *read_object_file_extended(struct repository *r,
 		die(_("packed object %s (stored in %s) is corrupt"),
 		    oid_to_hex(repl), p->pack_name);
 
+	obj_read_unlock();
 	return NULL;
 }
 
