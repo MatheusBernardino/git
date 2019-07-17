@@ -1416,10 +1416,70 @@ static int loose_object_info(struct repository *r,
 	return (status < 0) ? status : 0;
 }
 
+int obj_read_use_locks = 0;
+pthread_mutex_t oid_object_info_mutex;
+
+/* Protects the thread-unsafe section of read_object_file_extended() */
+static pthread_mutex_t read_object_file_mutex;
+
+static inline void read_object_file_lock(void)
+{
+	if(obj_read_use_locks)
+		pthread_mutex_lock(&read_object_file_mutex);
+}
+
+static inline void read_object_file_unlock(void)
+{
+	if(obj_read_use_locks)
+		pthread_mutex_unlock(&read_object_file_mutex);
+}
+
+/*
+ * Protects the calls to lookup_replace_object() in read_object_file_extended()
+ * and do_oid_object_info_extended().
+ */
+static pthread_mutex_t lookup_replace_mutex;
+
+static inline void lookup_replace_lock(void)
+{
+	if(obj_read_use_locks)
+		pthread_mutex_lock(&lookup_replace_mutex);
+}
+
+static inline void lookup_replace_unlock(void)
+{
+	if(obj_read_use_locks)
+		pthread_mutex_unlock(&lookup_replace_mutex);
+}
+
+void enable_obj_read_locks(void)
+{
+	if (obj_read_use_locks)
+		return;
+
+	obj_read_use_locks = 1;
+	pthread_mutex_init(&oid_object_info_mutex, NULL);
+	pthread_mutex_init(&read_object_file_mutex, NULL);
+	pthread_mutex_init(&lookup_replace_mutex, NULL);
+}
+
+void disable_obj_read_locks(void)
+{
+	if (!obj_read_use_locks)
+		return;
+
+	obj_read_use_locks = 0;
+	pthread_mutex_destroy(&oid_object_info_mutex);
+	pthread_mutex_destroy(&read_object_file_mutex);
+	pthread_mutex_destroy(&lookup_replace_mutex);
+}
+
+
 int fetch_if_missing = 1;
 
-int oid_object_info_extended(struct repository *r, const struct object_id *oid,
-			     struct object_info *oi, unsigned flags)
+static int do_oid_object_info_extended(struct repository *r,
+				       const struct object_id *oid,
+				       struct object_info *oi, unsigned flags)
 {
 	static struct object_info blank_oi = OBJECT_INFO_INIT;
 	struct pack_entry e;
@@ -1427,8 +1487,13 @@ int oid_object_info_extended(struct repository *r, const struct object_id *oid,
 	const struct object_id *real = oid;
 	int already_retried = 0;
 
-	if (flags & OBJECT_INFO_LOOKUP_REPLACE)
+
+	if (flags & OBJECT_INFO_LOOKUP_REPLACE) {
+		lookup_replace_lock();
 		real = lookup_replace_object(r, oid);
+		lookup_replace_unlock();
+
+	}
 
 	if (is_null_oid(real))
 		return -1;
@@ -1512,6 +1577,17 @@ int oid_object_info_extended(struct repository *r, const struct object_id *oid,
 	return 0;
 }
 
+int oid_object_info_extended(struct repository *r, const struct object_id *oid,
+			     struct object_info *oi, unsigned flags)
+{
+	int ret;
+	oid_object_info_lock();
+	ret = do_oid_object_info_extended(r, oid, oi, flags);
+	oid_object_info_unlock();
+	return ret;
+}
+
+
 /* returns enum object_type or negative */
 int oid_object_info(struct repository *r,
 		    const struct object_id *oid,
@@ -1576,14 +1652,22 @@ void *read_object_file_extended(struct repository *r,
 	const struct packed_git *p;
 	const char *path;
 	struct stat st;
-	const struct object_id *repl = lookup_replace ?
-		lookup_replace_object(r, oid) : oid;
+	const struct object_id *repl;
+
+	if (lookup_replace) {
+		lookup_replace_lock();
+		repl = lookup_replace_object(r, oid);
+		lookup_replace_unlock();
+	} else {
+		repl = oid;
+	}
 
 	errno = 0;
 	data = read_object(r, repl, type, size);
 	if (data)
 		return data;
 
+	read_object_file_lock();
 	if (errno && errno != ENOENT)
 		die_errno(_("failed to read object %s"), oid_to_hex(oid));
 
@@ -1599,6 +1683,7 @@ void *read_object_file_extended(struct repository *r,
 	if ((p = has_packed_and_bad(r, repl->hash)) != NULL)
 		die(_("packed object %s (stored in %s) is corrupt"),
 		    oid_to_hex(repl), p->pack_name);
+	read_object_file_unlock();
 
 	return NULL;
 }
