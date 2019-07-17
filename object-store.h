@@ -159,6 +159,10 @@ const char *loose_object_path(struct repository *r, struct strbuf *buf,
 void *map_loose_object(struct repository *r, const struct object_id *oid,
 		       unsigned long *size);
 
+void enable_obj_read_lock(void);
+void disable_obj_read_lock(void);
+void obj_read_lock(void);
+void obj_read_unlock(void);
 void *read_object_file_extended(struct repository *r,
 				const struct object_id *oid,
 				enum object_type *type,
