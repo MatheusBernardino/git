@@ -1463,16 +1463,49 @@ int pretend_object_file(void *buf, unsigned long len, enum object_type type,
 	return 0;
 }
 
+static pthread_mutex_t obj_read_mutex;
+static int obj_read_use_lock = 0;
+
+void enable_obj_read_lock(void)
+{
+	if (obj_read_use_lock)
+		return;
+
+	obj_read_use_lock = 1;
+	pthread_mutex_init(&obj_read_mutex, NULL);
+}
+
+void disable_obj_read_lock(void)
+{
+	if (!obj_read_use_lock)
+		return;
+
+	obj_read_use_lock = 0;
+	pthread_mutex_destroy(&obj_read_mutex);
+}
+
+void obj_read_lock(void)
+{
+	if(obj_read_use_lock)
+		pthread_mutex_lock(&obj_read_mutex);
+}
+
+void obj_read_unlock(void)
+{
+	if(obj_read_use_lock)
+		pthread_mutex_unlock(&obj_read_mutex);
+}
+
 /*
  * This function dies on corrupt objects; the callers who want to
  * deal with them should arrange to call read_object() and give error
  * messages themselves.
  */
-void *read_object_file_extended(struct repository *r,
-				const struct object_id *oid,
-				enum object_type *type,
-				unsigned long *size,
-				int lookup_replace)
+static void *do_read_object_file_extended(struct repository *r,
+					  const struct object_id *oid,
+					  enum object_type *type,
+					  unsigned long *size,
+					  int lookup_replace)
 {
 	void *data;
 	const struct packed_git *p;
@@ -1503,6 +1536,19 @@ void *read_object_file_extended(struct repository *r,
 		    oid_to_hex(repl), p->pack_name);
 
 	return NULL;
+}
+
+void *read_object_file_extended(struct repository *r,
+				const struct object_id *oid,
+				enum object_type *type,
+				unsigned long *size,
+				int lookup_replace)
+{
+	void *data;
+	obj_read_lock();
+	data = do_read_object_file_extended(r, oid, type, size, lookup_replace);
+	obj_read_unlock();
+	return data;
 }
 
 void *read_object_with_reference(const struct object_id *oid,
