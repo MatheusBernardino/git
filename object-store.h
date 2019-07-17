@@ -6,6 +6,7 @@
 #include "list.h"
 #include "sha1-array.h"
 #include "strbuf.h"
+#include "thread-utils.h"
 
 struct object_directory {
 	struct object_directory *next;
@@ -227,6 +228,30 @@ int repo_has_object_file_with_flags(struct repository *r,
 int has_loose_object_nonlocal(const struct object_id *);
 
 void assert_oid_type(const struct object_id *oid, enum object_type expect);
+
+/*
+ * Enabling the object read lock allows multiple threads to safely call the
+ * following functions in parallel: repo_read_object_file(), read_object_file(),
+ * read_object_file_extended(), read_object_with_reference(), read_object(),
+ * oid_object_info() and oid_object_info_extended().
+ */
+void enable_obj_read_locks(void);
+void disable_obj_read_locks(void);
+
+extern int obj_read_use_locks;
+extern pthread_mutex_t oid_object_info_mutex;
+
+static inline void oid_object_info_lock(void)
+{
+	if(obj_read_use_locks)
+		pthread_mutex_lock(&oid_object_info_mutex);
+}
+
+static inline void oid_object_info_unlock(void)
+{
+	if(obj_read_use_locks)
+		pthread_mutex_unlock(&oid_object_info_mutex);
+}
 
 struct object_info {
 	/* Request */
