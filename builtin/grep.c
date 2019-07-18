@@ -1042,7 +1042,7 @@ int cmd_grep(int argc, const char **argv, const char *prefix)
 	pathspec.recursive = 1;
 	pathspec.recurse_submodules = !!recurse_submodules;
 
-	if (list.nr || cached || show_in_pager) {
+	if (show_in_pager || ((list.nr || cached) && opt.allow_textconv)) {
 		if (num_threads > 1)
 			warning(_("invalid option combination, ignoring --threads"));
 		num_threads = 1;
