@@ -480,6 +480,7 @@ struct raw_object_store *raw_object_store_new(void)
 
 	memset(o, 0, sizeof(*o));
 	INIT_LIST_HEAD(&o->packed_git_mru);
+	pthread_mutex_init(&o->mru_lock, NULL);
 	return o;
 }
 

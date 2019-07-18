@@ -200,12 +200,13 @@ static void start_threads(struct grep_opt *opt)
 	int i;
 
 	pthread_mutex_init(&grep_mutex, NULL);
-	pthread_mutex_init(&grep_read_mutex, NULL);
+	pthread_mutex_init(&grep_textconv_mutex, NULL);
 	pthread_mutex_init(&grep_attr_mutex, NULL);
 	pthread_cond_init(&cond_add, NULL);
 	pthread_cond_init(&cond_write, NULL);
 	pthread_cond_init(&cond_result, NULL);
 	grep_use_locks = 1;
+	enable_obj_read_lock();
 
 	for (i = 0; i < ARRAY_SIZE(todo); i++) {
 		strbuf_init(&todo[i].out, 0);
@@ -257,12 +258,13 @@ static int wait_all(void)
 	free(threads);
 
 	pthread_mutex_destroy(&grep_mutex);
-	pthread_mutex_destroy(&grep_read_mutex);
+	pthread_mutex_destroy(&grep_textconv_mutex);
 	pthread_mutex_destroy(&grep_attr_mutex);
 	pthread_cond_destroy(&cond_add);
 	pthread_cond_destroy(&cond_write);
 	pthread_cond_destroy(&cond_result);
 	grep_use_locks = 0;
+	disable_obj_read_lock();
 
 	return hit;
 }
@@ -293,16 +295,6 @@ static int grep_cmd_config(const char *var, const char *value, void *cb)
 		recurse_submodules = git_config_bool(var, value);
 
 	return st;
-}
-
-static void *lock_and_read_oid_file(const struct object_id *oid, enum object_type *type, unsigned long *size)
-{
-	void *data;
-
-	grep_read_lock();
-	data = read_object_file(oid, type, size);
-	grep_read_unlock();
-	return data;
 }
 
 static int grep_oid(struct grep_opt *opt, const struct object_id *oid,
@@ -412,23 +404,9 @@ static int grep_submodule(struct grep_opt *opt,
 	struct grep_opt subopt;
 	int hit;
 
-	/*
-	 * NEEDSWORK: submodules functions need to be protected because they
-	 * access the object store via config_from_gitmodules(): the latter
-	 * uses get_oid() which, for now, relies on the global the_repository
-	 * object.
-	 */
-	grep_read_lock();
-
-	if (!is_submodule_active(superproject, path)) {
-		grep_read_unlock();
+	if (!is_submodule_active(superproject, path) ||
+	    repo_submodule_init(&subrepo, superproject, sub))
 		return 0;
-	}
-
-	if (repo_submodule_init(&subrepo, superproject, sub)) {
-		grep_read_unlock();
-		return 0;
-	}
 
 	repo_read_gitmodules(&subrepo);
 
@@ -443,7 +421,6 @@ static int grep_submodule(struct grep_opt *opt,
 	 * object.
 	 */
 	add_to_alternates_memory(subrepo.objects->odb->path);
-	grep_read_unlock();
 
 	memcpy(&subopt, opt, sizeof(subopt));
 	subopt.repo = &subrepo;
@@ -457,10 +434,8 @@ static int grep_submodule(struct grep_opt *opt,
 
 		object = parse_object_or_die(oid, oid_to_hex(oid));
 
-		grep_read_lock();
 		data = read_object_with_reference(&object->oid, tree_type,
 						  &size, NULL);
-		grep_read_unlock();
 
 		if (!data)
 			die(_("unable to read tree (%s)"), oid_to_hex(&object->oid));
@@ -585,7 +560,7 @@ static int grep_tree(struct grep_opt *opt, const struct pathspec *pathspec,
 			void *data;
 			unsigned long size;
 
-			data = lock_and_read_oid_file(&entry.oid, &type, &size);
+			data = read_object_file(&entry.oid, &type, &size);
 			if (!data)
 				die(_("unable to read tree (%s)"),
 				    oid_to_hex(&entry.oid));
@@ -622,10 +597,8 @@ static int grep_object(struct grep_opt *opt, const struct pathspec *pathspec,
 		struct strbuf base;
 		int hit, len;
 
-		grep_read_lock();
 		data = read_object_with_reference(&obj->oid, tree_type,
 						  &size, NULL);
-		grep_read_unlock();
 
 		if (!data)
 			die(_("unable to read tree (%s)"), oid_to_hex(&obj->oid));

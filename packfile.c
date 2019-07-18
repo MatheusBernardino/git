@@ -226,6 +226,7 @@ static struct packed_git *alloc_packed_git(int extra)
 	struct packed_git *p = xmalloc(st_add(sizeof(*p), extra));
 	memset(p, 0, sizeof(*p));
 	p->pack_fd = -1;
+	pthread_mutex_init(&p->windows_lock, NULL);
 	return p;
 }
 
@@ -245,6 +246,7 @@ struct packed_git *parse_pack_index(unsigned char *sha1, const char *idx_path)
 	return p;
 }
 
+/* windows_lock must be held by caller */
 static void scan_windows(struct packed_git *p,
 	struct packed_git **lru_p,
 	struct pack_window **lru_w,
@@ -269,6 +271,7 @@ static int unuse_one_window(struct packed_git *current)
 	struct packed_git *p, *lru_p = NULL;
 	struct pack_window *lru_w = NULL, *lru_l = NULL;
 
+	pthread_mutex_lock(&current->windows_lock);
 	if (current)
 		scan_windows(current, &lru_p, &lru_w, &lru_l);
 	for (p = the_repository->objects->packed_git; p; p = p->next)
@@ -282,8 +285,10 @@ static int unuse_one_window(struct packed_git *current)
 			lru_p->windows = lru_w->next;
 		free(lru_w);
 		pack_open_windows--;
+		pthread_mutex_unlock(&current->windows_lock);
 		return 1;
 	}
+	pthread_mutex_unlock(&current->windows_lock);
 	return 0;
 }
 
@@ -296,6 +301,7 @@ void release_pack_memory(size_t need)
 
 void close_pack_windows(struct packed_git *p)
 {
+	pthread_mutex_lock(&p->windows_lock);
 	while (p->windows) {
 		struct pack_window *w = p->windows;
 
@@ -308,6 +314,7 @@ void close_pack_windows(struct packed_git *p)
 		p->windows = w->next;
 		free(w);
 	}
+	pthread_mutex_unlock(&p->windows_lock);
 }
 
 int close_pack_fd(struct packed_git *p)
@@ -364,13 +371,16 @@ static void find_lru_pack(struct packed_git *p, struct packed_git **lru_p, struc
 	struct pack_window *w, *this_mru_w;
 	int has_windows_inuse = 0;
 
+	pthread_mutex_lock(&p->windows_lock);
 	/*
 	 * Reject this pack if it has windows and the previously selected
 	 * one does not.  If this pack does not have windows, reject
 	 * it if the pack file is newer than the previously selected one.
 	 */
-	if (*lru_p && !*mru_w && (p->windows || p->mtime > (*lru_p)->mtime))
+	if (*lru_p && !*mru_w && (p->windows || p->mtime > (*lru_p)->mtime)) {
+		pthread_mutex_unlock(&p->windows_lock);
 		return;
+	}
 
 	for (w = this_mru_w = p->windows; w; w = w->next) {
 		/*
@@ -382,8 +392,10 @@ static void find_lru_pack(struct packed_git *p, struct packed_git **lru_p, struc
 		if (w->inuse_cnt) {
 			if (*accept_windows_inuse)
 				has_windows_inuse = 1;
-			else
+			else {
+				pthread_mutex_unlock(&p->windows_lock);
 				return;
+			}
 		}
 
 		if (w->last_used > this_mru_w->last_used)
@@ -398,10 +410,13 @@ static void find_lru_pack(struct packed_git *p, struct packed_git **lru_p, struc
 		 * inuse windows to one that has inuse windows.
 		 */
 		if (*mru_w && *accept_windows_inuse == has_windows_inuse &&
-		    this_mru_w->last_used > (*mru_w)->last_used)
+		    this_mru_w->last_used > (*mru_w)->last_used) {
+			pthread_mutex_unlock(&p->windows_lock);
 			return;
+		}
 	}
 
+	pthread_mutex_unlock(&p->windows_lock);
 	/*
 	 * Select this pack.
 	 */
@@ -600,12 +615,24 @@ static int in_window(struct pack_window *win, off_t offset)
 		&& (offset + the_hash_algo->rawsz) <= (win_off + win->len);
 }
 
+/* NEEDSWORK: this is a provisory lock which should be removed */
+static pthread_mutex_t use_pack_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 unsigned char *use_pack(struct packed_git *p,
 		struct pack_window **w_cursor,
 		off_t offset,
 		unsigned long *left)
 {
 	struct pack_window *win = *w_cursor;
+
+	/*
+	 * NEEDSWORK: once we firgure out how to properly do it, the following
+	 * pthread_mutex_lock call should be replaced by:
+	 *     pthread_mutex_unlock(&p->windows_lock);
+	 * For now, this results in race conditions, but we should solve that.
+	 * The same goes for the unlock call in the end of the function.
+	 */
+	pthread_mutex_lock(&use_pack_mutex);
 
 	/* Since packfiles end in a hash of their content and it's
 	 * pointless to ask for an offset into the middle of that
@@ -670,6 +697,9 @@ unsigned char *use_pack(struct packed_git *p,
 	offset -= win->offset;
 	if (left)
 		*left = win->len - xsize_t(offset);
+
+	/* NEEDSWORK: check the comment in the beginning of this function */
+	pthread_mutex_unlock(&use_pack_mutex);
 	return win->base + offset;
 }
 
@@ -2000,13 +2030,16 @@ int find_pack_entry(struct repository *r, const struct object_id *oid, struct pa
 			return 1;
 	}
 
+	pthread_mutex_lock(&r->objects->mru_lock);
 	list_for_each(pos, &r->objects->packed_git_mru) {
 		struct packed_git *p = list_entry(pos, struct packed_git, mru);
 		if (!p->multi_pack_index && fill_pack_entry(oid, e, p)) {
 			list_move(&p->mru, &r->objects->packed_git_mru);
+			pthread_mutex_unlock(&r->objects->mru_lock);
 			return 1;
 		}
 	}
+	pthread_mutex_unlock(&r->objects->mru_lock);
 	return 0;
 }
 

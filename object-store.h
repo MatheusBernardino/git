@@ -71,6 +71,7 @@ struct packed_git {
 	time_t mtime;
 	int pack_fd;
 	int index;              /* for builtin/pack-objects.c */
+	pthread_mutex_t windows_lock;
 	unsigned pack_local:1,
 		 pack_keep:1,
 		 pack_keep_in_core:1,
@@ -128,6 +129,7 @@ struct raw_object_store {
 	struct packed_git *packed_git;
 	/* A most-recently-used ordered version of the packed_git list. */
 	struct list_head packed_git_mru;
+	pthread_mutex_t mru_lock;
 
 	/*
 	 * A fast, rough count of the number of objects in the repository.
