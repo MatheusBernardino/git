@@ -330,6 +330,15 @@ EXAMPLES
 `git grep solution -- :^Documentation`::
 	Looks for `solution`, excluding files in `Documentation`.
 
+NOTES
+-----
+
+The --threads option (and grep.threads configuration) will be ignored when
+--open-files-in-pager is used, forcing a single-threaded execution.
+
+When grepping the index file (with --cached or giving tree objects), --textconv
+will also suppress thread creation.
+
 GIT
 ---
 Part of the linkgit:git[1] suite
