@@ -408,4 +408,10 @@ test_expect_success 'grep --recurse-submodules with submodules without .gitmodul
 	test_cmp expect actual
 '
 
+test_expect_success 'grep --recurse-submodules without --cached considers worktree modifications' '
+	echo "A modified line in submodule" >>submodule/a &&
+	echo "submodule/a:A modified line in submodule" >expect &&
+	git grep --recurse-submodules "A modified line in submodule" >actual &&
+	test_cmp expect actual
+'
 test_done
