@@ -229,6 +229,10 @@ int grep_source(struct grep_opt *opt, struct grep_source *gs);
 struct grep_opt *grep_opt_dup(const struct grep_opt *opt);
 int grep_threads_ok(const struct grep_opt *opt);
 
+#define GREP_USE_READ_LOCK (1 << 0)
+#define GREP_USE_ATTR_LOCK (1 << 1)
+#define GREP_USE_ALL_LOCKS (~0)
+
 /*
  * Mutex used around access to the attributes machinery if
  * opt->use_threads.  Must be initialized/destroyed by callers!
@@ -239,13 +243,13 @@ extern pthread_mutex_t grep_read_mutex;
 
 static inline void grep_read_lock(void)
 {
-	if (grep_use_locks)
+	if (grep_use_locks & GREP_USE_READ_LOCK)
 		pthread_mutex_lock(&grep_read_mutex);
 }
 
 static inline void grep_read_unlock(void)
 {
-	if (grep_use_locks)
+	if (grep_use_locks & GREP_USE_READ_LOCK)
 		pthread_mutex_unlock(&grep_read_mutex);
 }
 

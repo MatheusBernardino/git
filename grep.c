@@ -1523,13 +1523,13 @@ pthread_mutex_t grep_attr_mutex;
 
 static inline void grep_attr_lock(void)
 {
-	if (grep_use_locks)
+	if (grep_use_locks & GREP_USE_ATTR_LOCK)
 		pthread_mutex_lock(&grep_attr_mutex);
 }
 
 static inline void grep_attr_unlock(void)
 {
-	if (grep_use_locks)
+	if (grep_use_locks & GREP_USE_ATTR_LOCK)
 		pthread_mutex_unlock(&grep_attr_mutex);
 }
 
