@@ -205,7 +205,17 @@ static void start_threads(struct grep_opt *opt)
 	pthread_cond_init(&cond_add, NULL);
 	pthread_cond_init(&cond_write, NULL);
 	pthread_cond_init(&cond_result, NULL);
-	grep_use_locks = GREP_USE_ALL_LOCKS;
+	if (recurse_submodules || opt->allow_textconv) {
+		/*
+		 * textconv and submodules' operations are not thread-safe yet
+		 * so we must use grep_read_lock when grepping multithreaded
+		 * with these options.
+		 */
+		grep_use_locks = GREP_USE_ALL_LOCKS;
+	} else {
+		grep_use_locks = GREP_USE_ATTR_LOCK;
+		enable_obj_read_lock();
+	}
 
 	for (i = 0; i < ARRAY_SIZE(todo); i++) {
 		strbuf_init(&todo[i].out, 0);
@@ -227,7 +237,7 @@ static void start_threads(struct grep_opt *opt)
 	}
 }
 
-static int wait_all(void)
+static int wait_all(struct grep_opt *opt)
 {
 	int hit = 0;
 	int i;
@@ -263,6 +273,9 @@ static int wait_all(void)
 	pthread_cond_destroy(&cond_write);
 	pthread_cond_destroy(&cond_result);
 	grep_use_locks = 0;
+	if (!recurse_submodules && !opt->allow_textconv) {
+		disable_obj_read_lock();
+	}
 
 	return hit;
 }
@@ -1140,7 +1153,7 @@ int cmd_grep(int argc, const char **argv, const char *prefix)
 	}
 
 	if (num_threads > 1)
-		hit |= wait_all();
+		hit |= wait_all(&opt);
 	if (hit && show_in_pager)
 		run_pager(&opt, prefix);
 	clear_pathspec(&pathspec);
