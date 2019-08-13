@@ -2049,7 +2049,7 @@ int grep_buffer(struct grep_opt *opt, char *buf, unsigned long size)
 	struct grep_source gs;
 	int r;
 
-	grep_source_init(&gs, GREP_SOURCE_BUF, NULL, NULL, NULL);
+	grep_source_init(&gs, GREP_SOURCE_BUF, NULL, NULL, NULL, NULL);
 	gs.buf = buf;
 	gs.size = size;
 
@@ -2061,11 +2061,12 @@ int grep_buffer(struct grep_opt *opt, char *buf, unsigned long size)
 
 void grep_source_init(struct grep_source *gs, enum grep_source_type type,
 		      const char *name, const char *path,
-		      const void *identifier)
+		      const void *identifier, struct repository *r)
 {
 	gs->type = type;
 	gs->name = xstrdup_or_null(name);
 	gs->path = xstrdup_or_null(path);
+	gs->repo = r;
 	gs->buf = NULL;
 	gs->size = 0;
 	gs->driver = NULL;
@@ -2088,6 +2089,7 @@ void grep_source_clear(struct grep_source *gs)
 	FREE_AND_NULL(gs->name);
 	FREE_AND_NULL(gs->path);
 	FREE_AND_NULL(gs->identifier);
+	gs->repo = NULL;
 	grep_source_clear_data(gs);
 }
 
@@ -2110,7 +2112,8 @@ static int grep_source_load_oid(struct grep_source *gs)
 	enum object_type type;
 
 	grep_read_lock();
-	gs->buf = read_object_file(gs->identifier, &type, &gs->size);
+	gs->buf = repo_read_object_file(gs->repo, gs->identifier, &type,
+					&gs->size);
 	grep_read_unlock();
 
 	if (!gs->buf)

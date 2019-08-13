@@ -207,6 +207,7 @@ struct grep_source {
 		GREP_SOURCE_BUF,
 	} type;
 	void *identifier;
+	struct repository *repo;
 
 	char *buf;
 	unsigned long size;
@@ -217,7 +218,7 @@ struct grep_source {
 
 void grep_source_init(struct grep_source *gs, enum grep_source_type type,
 		      const char *name, const char *path,
-		      const void *identifier);
+		      const void *identifier, struct repository *r);
 void grep_source_clear_data(struct grep_source *gs);
 void grep_source_clear(struct grep_source *gs);
 void grep_source_load_driver(struct grep_source *gs,
