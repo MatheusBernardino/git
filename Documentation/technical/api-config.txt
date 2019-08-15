@@ -47,7 +47,7 @@ will first feed the user-wide one to the callback, and then the
 repo-specific one; by overwriting, the higher-priority repo-specific
 value is left at the end).
 
-The `config_with_options` function lets the caller examine config
+The `repo_config_with_options` function lets the caller examine config
 while adjusting some of the default behavior of `git_config`. It should
 almost never be used by "regular" Git code that is looking up
 configuration variables. It is intended for advanced callers like
@@ -64,6 +64,9 @@ to `NULL`.
 Specify options to adjust the behavior of parsing config files. See `struct
 config_options` in `config.h` for details. As an example: regular `git_config`
 sets `opts.respect_includes` to `1` by default.
+
+The `config_with_options` macro is provided as an alias for
+`repo_config_with_options`, using 'the_repository' by default.
 
 Reading Specific Files
 ----------------------
