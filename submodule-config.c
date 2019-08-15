@@ -616,7 +616,8 @@ static void submodule_cache_check_init(struct repository *repo)
  * the repository.
  *
  * Runs the provided config function on the '.gitmodules' file found in the
- * working directory.
+ * working directory. If the file is not present, tries to retrieve it from
+ * the staging area or HEAD.
  */
 static void config_from_gitmodules(config_fn_t fn, struct repository *repo, void *data)
 {
@@ -633,13 +634,11 @@ static void config_from_gitmodules(config_fn_t fn, struct repository *repo, void
 		} else if (repo_get_oid(repo, GITMODULES_INDEX, &oid) >= 0 ||
 			   repo_get_oid(repo, GITMODULES_HEAD, &oid) >= 0) {
 			config_source.blob = oidstr = xstrdup(oid_to_hex(&oid));
-			if (repo != the_repository)
-				add_to_alternates_memory(repo->objects->odb->path);
 		} else {
 			goto out;
 		}
 
-		config_with_options(fn, data, &config_source, &opts);
+		repo_config_with_options(repo, fn, data, &config_source, &opts);
 
 out:
 		free(oidstr);
