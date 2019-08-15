@@ -82,16 +82,24 @@ int git_config_from_mem(config_fn_t fn,
 			const char *name,
 			const char *buf, size_t len,
 			void *data, const struct config_options *opts);
-int git_config_from_blob_oid(config_fn_t fn, const char *name,
-			     const struct object_id *oid, void *data);
+int git_config_from_blob_oid(struct repository *r, config_fn_t fn,
+			     const char *name, const struct object_id *oid,
+			     void *data);
 void git_config_push_parameter(const char *text);
 int git_config_from_parameters(config_fn_t fn, void *data);
 void read_early_config(config_fn_t cb, void *data);
 void read_very_early_config(config_fn_t cb, void *data);
 void git_config(config_fn_t fn, void *);
-int config_with_options(config_fn_t fn, void *,
-			struct git_config_source *config_source,
-			const struct config_options *opts);
+int repo_config_with_options(struct repository *r, config_fn_t fn, void *data,
+			     struct git_config_source *config_source,
+			     const struct config_options *opts);
+static inline int config_with_options(config_fn_t fn, void *data,
+				      struct git_config_source *config_source,
+				      const struct config_options *opts)
+{
+	return repo_config_with_options(the_repository, fn, data, config_source,
+					opts);
+}
 int git_parse_ssize_t(const char *, ssize_t *);
 int git_parse_ulong(const char *, unsigned long *);
 int git_parse_maybe_bool(const char *);
