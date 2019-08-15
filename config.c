@@ -1624,17 +1624,16 @@ int git_config_from_mem(config_fn_t fn,
 	return do_config_from(&top, fn, data, opts);
 }
 
-int git_config_from_blob_oid(config_fn_t fn,
-			      const char *name,
-			      const struct object_id *oid,
-			      void *data)
+int git_config_from_blob_oid(struct repository *r, config_fn_t fn,
+			     const char *name, const struct object_id *oid,
+			     void *data)
 {
 	enum object_type type;
 	char *buf;
 	unsigned long size;
 	int ret;
 
-	buf = read_object_file(oid, &type, &size);
+	buf = repo_read_object_file(r, oid, &type, &size);
 	if (!buf)
 		return error(_("unable to load config blob object '%s'"), name);
 	if (type != OBJ_BLOB) {
@@ -1649,15 +1648,14 @@ int git_config_from_blob_oid(config_fn_t fn,
 	return ret;
 }
 
-static int git_config_from_blob_ref(config_fn_t fn,
-				    const char *name,
-				    void *data)
+static int git_config_from_blob_ref(struct repository *r, config_fn_t fn,
+				    const char *name, void *data)
 {
 	struct object_id oid;
 
-	if (get_oid(name, &oid) < 0)
+	if (repo_get_oid(r, name, &oid) < 0)
 		return error(_("unable to resolve config blob '%s'"), name);
-	return git_config_from_blob_oid(fn, name, &oid, data);
+	return git_config_from_blob_oid(r, fn, name, &oid, data);
 }
 
 const char *git_etc_gitconfig(void)
@@ -1751,9 +1749,9 @@ static int do_git_config_sequence(const struct config_options *opts,
 	return ret;
 }
 
-int config_with_options(config_fn_t fn, void *data,
-			struct git_config_source *config_source,
-			const struct config_options *opts)
+int repo_config_with_options(struct repository *r, config_fn_t fn, void *data,
+			     struct git_config_source *config_source,
+			     const struct config_options *opts)
 {
 	struct config_include_data inc = CONFIG_INCLUDE_INIT;
 
@@ -1774,7 +1772,7 @@ int config_with_options(config_fn_t fn, void *data,
 	else if (config_source && config_source->file)
 		return git_config_from_file(fn, config_source->file, data);
 	else if (config_source && config_source->blob)
-		return git_config_from_blob_ref(fn, config_source->blob, data);
+		return git_config_from_blob_ref(r, fn, config_source->blob, data);
 
 	return do_git_config_sequence(opts, fn, data);
 }
