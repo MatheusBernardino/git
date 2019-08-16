@@ -1533,9 +1533,21 @@ static inline void grep_attr_unlock(void)
 }
 
 /*
- * Same as git_attr_mutex, but protecting the thread-unsafe object db access.
+ * Same as git_attr_mutex, but protecting the thread-unsafe textconv operations.
  */
-pthread_mutex_t grep_read_mutex;
+pthread_mutex_t grep_textconv_mutex;
+
+static inline void grep_textconv_lock(void)
+{
+	if (grep_use_locks)
+		pthread_mutex_lock(&grep_textconv_mutex);
+}
+
+static inline void grep_textconv_unlock(void)
+{
+	if (grep_use_locks)
+		pthread_mutex_unlock(&grep_textconv_mutex);
+}
 
 static int match_funcname(struct grep_opt *opt, struct grep_source *gs, char *bol, char *eol)
 {
@@ -1733,13 +1745,13 @@ static int fill_textconv_grep(struct repository *r,
 	}
 
 	/*
-	 * fill_textconv is not remotely thread-safe; it may load objects
-	 * behind the scenes, and it modifies the global diff tempfile
-	 * structure.
+	 * fill_textconv is not thread-safe; it may load objects behind the
+	 * scenes (but this is protected with enable_obj_read_locks()), and it
+	 * modifies the global diff tempfile structure.
 	 */
-	grep_read_lock();
+	grep_textconv_lock();
 	size = fill_textconv(r, driver, df, &buf);
-	grep_read_unlock();
+	grep_textconv_unlock();
 	free_filespec(df);
 
 	/*
@@ -2108,10 +2120,7 @@ static int grep_source_load_oid(struct repository *r, struct grep_source *gs)
 {
 	enum object_type type;
 
-	grep_read_lock();
 	gs->buf = repo_read_object_file(r, gs->identifier, &type, &gs->size);
-	grep_read_unlock();
-
 	if (!gs->buf)
 		return error(_("'%s': unable to read %s"),
 			     gs->name,
