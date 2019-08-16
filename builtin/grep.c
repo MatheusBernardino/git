@@ -459,9 +459,8 @@ static int grep_submodule(struct grep_opt *opt,
 		unsigned long size;
 		struct strbuf base = STRBUF_INIT;
 
-		object = parse_object_or_die(oid, oid_to_hex(oid));
-
 		grep_read_lock();
+		object = parse_object_or_die(oid, oid_to_hex(oid));
 		data = read_object_with_reference(&subrepo,
 						  &object->oid, tree_type,
 						  &size, NULL);
