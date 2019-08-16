@@ -10,9 +10,8 @@
 #include "quote.h"
 #include "help.h"
 
-static int grep_source_load(struct grep_source *gs);
-static int grep_source_is_binary(struct grep_source *gs,
-				 struct index_state *istate);
+static int grep_source_load(struct repository *r, struct grep_source *gs);
+static int grep_source_is_binary(struct repository *r, struct grep_source *gs);
 
 static struct grep_opt grep_defaults;
 
@@ -1714,7 +1713,7 @@ static int fill_textconv_grep(struct repository *r,
 	size_t size;
 
 	if (!driver || !driver->textconv)
-		return grep_source_load(gs);
+		return grep_source_load(r, gs);
 
 	/*
 	 * The textconv interface is intimately tied to diff_filespecs, so we
@@ -1820,11 +1819,11 @@ static int grep_source_1(struct grep_opt *opt, struct grep_source *gs, int colle
 	if (!textconv) {
 		switch (opt->binary) {
 		case GREP_BINARY_DEFAULT:
-			if (grep_source_is_binary(gs, opt->repo->index))
+			if (grep_source_is_binary(opt->repo, gs))
 				binary_match_only = 1;
 			break;
 		case GREP_BINARY_NOMATCH:
-			if (grep_source_is_binary(gs, opt->repo->index))
+			if (grep_source_is_binary(opt->repo, gs))
 				return 0; /* Assume unmatch */
 			break;
 		case GREP_BINARY_TEXT:
@@ -2105,12 +2104,12 @@ void grep_source_clear_data(struct grep_source *gs)
 	}
 }
 
-static int grep_source_load_oid(struct grep_source *gs)
+static int grep_source_load_oid(struct repository *r, struct grep_source *gs)
 {
 	enum object_type type;
 
 	grep_read_lock();
-	gs->buf = read_object_file(gs->identifier, &type, &gs->size);
+	gs->buf = repo_read_object_file(r, gs->identifier, &type, &gs->size);
 	grep_read_unlock();
 
 	if (!gs->buf)
@@ -2154,7 +2153,7 @@ static int grep_source_load_file(struct grep_source *gs)
 	return 0;
 }
 
-static int grep_source_load(struct grep_source *gs)
+static int grep_source_load(struct repository *r, struct grep_source *gs)
 {
 	if (gs->buf)
 		return 0;
@@ -2163,7 +2162,7 @@ static int grep_source_load(struct grep_source *gs)
 	case GREP_SOURCE_FILE:
 		return grep_source_load_file(gs);
 	case GREP_SOURCE_OID:
-		return grep_source_load_oid(gs);
+		return grep_source_load_oid(r, gs);
 	case GREP_SOURCE_BUF:
 		return gs->buf ? 0 : -1;
 	}
@@ -2184,14 +2183,13 @@ void grep_source_load_driver(struct grep_source *gs,
 	grep_attr_unlock();
 }
 
-static int grep_source_is_binary(struct grep_source *gs,
-				 struct index_state *istate)
+static int grep_source_is_binary(struct repository *r, struct grep_source *gs)
 {
-	grep_source_load_driver(gs, istate);
+	grep_source_load_driver(gs, r->index);
 	if (gs->driver->binary != -1)
 		return gs->driver->binary;
 
-	if (!grep_source_load(gs))
+	if (!grep_source_load(r, gs))
 		return buffer_is_binary(gs->buf, gs->size);
 
 	return 0;

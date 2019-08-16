@@ -295,12 +295,14 @@ static int grep_cmd_config(const char *var, const char *value, void *cb)
 	return st;
 }
 
-static void *lock_and_read_oid_file(const struct object_id *oid, enum object_type *type, unsigned long *size)
+static void *lock_and_read_oid_file(struct repository *r,
+				    const struct object_id *oid,
+				    enum object_type *type, unsigned long *size)
 {
 	void *data;
 
 	grep_read_lock();
-	data = read_object_file(oid, type, size);
+	data = repo_read_object_file(r, oid, type, size);
 	grep_read_unlock();
 	return data;
 }
@@ -435,18 +437,6 @@ static int grep_submodule(struct grep_opt *opt,
 	}
 
 	repo_read_gitmodules(&subrepo);
-
-	/*
-	 * NEEDSWORK: This adds the submodule's object directory to the list of
-	 * alternates for the single in-memory object store.  This has some bad
-	 * consequences for memory (processed objects will never be freed) and
-	 * performance (this increases the number of pack files git has to pay
-	 * attention to, to the sum of the number of pack files in all the
-	 * repositories processed so far).  This can be removed once the object
-	 * store is no longer global and instead is a member of the repository
-	 * object.
-	 */
-	add_to_alternates_memory(subrepo.objects->odb->path);
 	grep_read_unlock();
 
 	memcpy(&subopt, opt, sizeof(subopt));
@@ -460,7 +450,7 @@ static int grep_submodule(struct grep_opt *opt,
 		struct strbuf base = STRBUF_INIT;
 
 		grep_read_lock();
-		object = parse_object_or_die(oid, oid_to_hex(oid));
+		object = repo_parse_object_or_die(&subrepo, oid, oid_to_hex(oid));
 		data = read_object_with_reference(&subrepo,
 						  &object->oid, tree_type,
 						  &size, NULL);
@@ -589,7 +579,7 @@ static int grep_tree(struct grep_opt *opt, const struct pathspec *pathspec,
 			void *data;
 			unsigned long size;
 
-			data = lock_and_read_oid_file(&entry.oid, &type, &size);
+			data = lock_and_read_oid_file(repo, &entry.oid, &type, &size);
 			if (!data)
 				die(_("unable to read tree (%s)"),
 				    oid_to_hex(&entry.oid));
