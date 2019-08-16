@@ -482,7 +482,12 @@ static int grep_submodule(struct grep_opt *opt,
 		hit = grep_cache(&subopt, pathspec, cached);
 	}
 
-	repo_clear(&subrepo);
+	/*
+	 * NEEDSWORK: The subrepo should be cleaned after use, calling
+	 * repo_clear(&subrepo). It's not possible to do it here, however, as
+	 * threads might still be working on the subrepo's objects.
+	 */
+
 	return hit;
 }
 
