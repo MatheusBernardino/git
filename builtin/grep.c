@@ -482,7 +482,6 @@ static int grep_submodule(struct grep_opt *opt,
 		hit = grep_cache(&subopt, pathspec, cached);
 	}
 
-	repo_clear(&subrepo);
 	return hit;
 }
 
