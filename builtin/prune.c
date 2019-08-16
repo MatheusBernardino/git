@@ -154,8 +154,8 @@ int cmd_prune(int argc, const char **argv, const char *prefix)
 		const char *name = *argv++;
 
 		if (!get_oid(name, &oid)) {
-			struct object *object = parse_object_or_die(&oid,
-								    name);
+			struct object *object =
+				parse_object_or_die(the_repository, &oid, name);
 			add_pending_object(&revs, object, "");
 		}
 		else

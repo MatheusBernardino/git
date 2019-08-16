@@ -699,7 +699,7 @@ struct bitmap_index *prepare_bitmap_walk(struct rev_info *revs)
 		struct object *object = revs->pending.objects[i].item;
 
 		if (object->type == OBJ_NONE)
-			parse_object_or_die(&object->oid, NULL);
+			parse_object_or_die(the_repository, &object->oid, NULL);
 
 		while (object->type == OBJ_TAG) {
 			struct tag *tag = (struct tag *) object;
@@ -711,7 +711,8 @@ struct bitmap_index *prepare_bitmap_walk(struct rev_info *revs)
 
 			if (!tag->tagged)
 				die("bad tag");
-			object = parse_object_or_die(&tag->tagged->oid, NULL);
+			object = parse_object_or_die(the_repository,
+						     &tag->tagged->oid, NULL);
 		}
 
 		if (object->flags & UNINTERESTING)

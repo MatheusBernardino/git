@@ -1220,7 +1220,7 @@ static int parse_want_ref(struct packet_writer *writer, const char *line,
 		item = string_list_append(wanted_refs, arg);
 		item->util = oiddup(&oid);
 
-		o = parse_object_or_die(&oid, arg);
+		o = parse_object_or_die(the_repository, &oid, arg);
 		if (!(o->flags & WANTED)) {
 			o->flags |= WANTED;
 			add_object_array(o, NULL, want_obj);
