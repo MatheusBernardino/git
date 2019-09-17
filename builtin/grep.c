@@ -43,6 +43,15 @@ static pthread_t *threads;
  */
 struct work_item {
 	struct grep_source source;
+
+	/*
+	 * Each worker thread is initialized with a 'struct grep_opt *opt' where
+	 * opt->repo points to the_repository. But a work item may refeer to a
+	 * subrepo. So the repository relative to each task is also passed to
+	 * the assigned thread and its opt->repo is updated when retrieving the
+	 * task.
+	 */
+	struct repository *repo;
 	char done;
 	struct strbuf out;
 };
@@ -64,6 +73,13 @@ static int todo_done;
 
 /* Has all work items been added? */
 static int all_work_added;
+
+/* Tracks the work progress in subrepos to correctly free them in the end */
+struct progress_in_subrepo {
+	struct repository subrepo;
+	int all_work_added;
+	int work_counter;
+};
 
 /* This lock protects all the variables above. */
 static pthread_mutex_t grep_mutex;
@@ -93,6 +109,8 @@ static int skip_first_line;
 
 static void add_work(struct grep_opt *opt, const struct grep_source *gs)
 {
+	struct progress_in_subrepo *p;
+
 	grep_lock();
 
 	while ((todo_end+1) % ARRAY_SIZE(todo) == todo_done) {
@@ -104,8 +122,14 @@ static void add_work(struct grep_opt *opt, const struct grep_source *gs)
 		grep_source_load_driver(&todo[todo_end].source,
 					opt->repo->index);
 	todo[todo_end].done = 0;
+	todo[todo_end].repo = opt->repo;
 	strbuf_reset(&todo[todo_end].out);
 	todo_end = (todo_end + 1) % ARRAY_SIZE(todo);
+
+	if (opt->repo != the_repository) {
+		p = container_of(opt->repo, struct progress_in_subrepo, subrepo);
+		p->work_counter++;
+	}
 
 	pthread_cond_signal(&cond_add);
 	grep_unlock();
@@ -132,6 +156,7 @@ static struct work_item *get_work(void)
 
 static void work_done(struct work_item *w)
 {
+	struct progress_in_subrepo *p;
 	int old_done;
 
 	grep_lock();
@@ -156,6 +181,17 @@ static void work_done(struct work_item *w)
 
 			write_or_die(1, p, len);
 		}
+
+		if (w->repo != the_repository) {
+			p = container_of(w->repo, struct progress_in_subrepo,
+					 subrepo);
+			p->work_counter--;
+			if (p->work_counter == 0 && p->all_work_added) {
+				repo_clear(&p->subrepo);
+				free(p);
+			}
+		}
+
 		grep_source_clear(&w->source);
 	}
 
@@ -179,6 +215,7 @@ static void *run(void *arg)
 			break;
 
 		opt->output_priv = w;
+		opt->repo = w->repo;
 		hit |= grep_source(opt, &w->source);
 		grep_source_clear_data(&w->source);
 		work_done(w);
@@ -295,12 +332,14 @@ static int grep_cmd_config(const char *var, const char *value, void *cb)
 	return st;
 }
 
-static void *lock_and_read_oid_file(const struct object_id *oid, enum object_type *type, unsigned long *size)
+static void *lock_and_read_oid_file(struct repository *r,
+				    const struct object_id *oid,
+				    enum object_type *type, unsigned long *size)
 {
 	void *data;
 
 	grep_read_lock();
-	data = read_object_file(oid, type, size);
+	data = repo_read_object_file(r, oid, type, size);
 	grep_read_unlock();
 	return data;
 }
@@ -405,7 +444,8 @@ static int grep_submodule(struct grep_opt *opt,
 			  const struct object_id *oid,
 			  const char *filename, const char *path, int cached)
 {
-	struct repository subrepo;
+	struct progress_in_subrepo *p = xcalloc(1, sizeof(*p));
+	struct repository *subrepo = &p->subrepo;
 	struct repository *superproject = opt->repo;
 	const struct submodule *sub = submodule_from_path(superproject,
 							  &null_oid, path);
@@ -422,31 +462,21 @@ static int grep_submodule(struct grep_opt *opt,
 
 	if (!is_submodule_active(superproject, path)) {
 		grep_read_unlock();
+		free(p);
 		return 0;
 	}
 
-	if (repo_submodule_init(&subrepo, superproject, sub)) {
+	if (repo_submodule_init(subrepo, superproject, sub)) {
 		grep_read_unlock();
+		free(p);
 		return 0;
 	}
 
-	repo_read_gitmodules(&subrepo);
-
-	/*
-	 * NEEDSWORK: This adds the submodule's object directory to the list of
-	 * alternates for the single in-memory object store.  This has some bad
-	 * consequences for memory (processed objects will never be freed) and
-	 * performance (this increases the number of pack files git has to pay
-	 * attention to, to the sum of the number of pack files in all the
-	 * repositories processed so far).  This can be removed once the object
-	 * store is no longer global and instead is a member of the repository
-	 * object.
-	 */
-	add_to_alternates_memory(subrepo.objects->odb->path);
+	repo_read_gitmodules(subrepo);
 	grep_read_unlock();
 
 	memcpy(&subopt, opt, sizeof(subopt));
-	subopt.repo = &subrepo;
+	subopt.repo = subrepo;
 
 	if (oid) {
 		struct object *object;
@@ -455,10 +485,10 @@ static int grep_submodule(struct grep_opt *opt,
 		unsigned long size;
 		struct strbuf base = STRBUF_INIT;
 
-		object = parse_object_or_die(the_repository, oid, NULL);
+		object = parse_object_or_die(subrepo, oid, NULL);
 
 		grep_read_lock();
-		data = read_object_with_reference(&subrepo,
+		data = read_object_with_reference(subrepo,
 						  &object->oid, tree_type,
 						  &size, NULL);
 		grep_read_unlock();
@@ -478,7 +508,13 @@ static int grep_submodule(struct grep_opt *opt,
 		hit = grep_cache(&subopt, pathspec, cached);
 	}
 
-	repo_clear(&subrepo);
+	grep_lock();
+	p->all_work_added = 1;
+	if (p->work_counter == 0) {
+		repo_clear(&p->subrepo);
+		free(p);
+	}
+	grep_unlock();
 	return hit;
 }
 
@@ -587,7 +623,7 @@ static int grep_tree(struct grep_opt *opt, const struct pathspec *pathspec,
 			void *data;
 			unsigned long size;
 
-			data = lock_and_read_oid_file(&entry.oid, &type, &size);
+			data = lock_and_read_oid_file(repo, &entry.oid, &type, &size);
 			if (!data)
 				die(_("unable to read tree (%s)"),
 				    oid_to_hex(&entry.oid));
