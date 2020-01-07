@@ -37,6 +37,27 @@ enum eol {
 #endif
 };
 
+enum crlf_action {
+	CRLF_UNDEFINED,
+	CRLF_BINARY,
+	CRLF_TEXT,
+	CRLF_TEXT_INPUT,
+	CRLF_TEXT_CRLF,
+	CRLF_AUTO,
+	CRLF_AUTO_INPUT,
+	CRLF_AUTO_CRLF
+};
+
+struct convert_driver;
+
+struct conv_attrs {
+	struct convert_driver *drv;
+	enum crlf_action attr_action; /* What attr says */
+	enum crlf_action crlf_action; /* When no attr is set, use core.autocrlf */
+	int ident;
+	const char *working_tree_encoding; /* Supported encoding or default encoding if NULL */
+};
+
 enum ce_delay_state {
 	CE_NO_DELAY = 0,
 	CE_CAN_DELAY = 1,
@@ -101,6 +122,9 @@ void convert_to_git_filter_fd(const struct index_state *istate,
 			      int conv_flags);
 int would_convert_to_git_filter_fd(const struct index_state *istate,
 				   const char *path);
+
+void convert_attrs(const struct index_state *istate,
+		   struct conv_attrs *ca, const char *path);
 
 /*
  * Initialize the checkout metadata with the given values.  Any argument may be
