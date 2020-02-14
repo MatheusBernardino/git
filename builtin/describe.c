@@ -267,7 +267,7 @@ static unsigned long finish_depth_computation(
 	return seen_commits;
 }
 
-static void append_name(struct commit_name *n, struct strbuf *dst)
+static void verify_tag_embedded_name(struct commit_name *n)
 {
 	if (n->prio == 2 && !n->tag) {
 		n->tag = lookup_tag(the_repository, &n->oid);
@@ -276,18 +276,10 @@ static void append_name(struct commit_name *n, struct strbuf *dst)
 	}
 	if (n->tag && !n->name_checked) {
 		if (!n->tag->tag)
-			die(_("annotated tag %s has no embedded name"), n->path);
-		if (strcmp(n->tag->tag, all ? n->path + 5 : n->path))
-			warning(_("tag '%s' is really '%s' here"), n->tag->tag, n->path);
+			warning(_("annotated tag %s has no embedded name"), n->path);
+		else if (strcmp(n->tag->tag, all ? n->path + 5 : n->path))
+			warning(_("tag '%s' is externally known as '%s'"), n->path, n->tag->tag);
 		n->name_checked = 1;
-	}
-
-	if (n->tag) {
-		if (all)
-			strbuf_addstr(dst, "tags/");
-		strbuf_addstr(dst, n->tag->tag);
-	} else {
-		strbuf_addstr(dst, n->path);
 	}
 }
 
@@ -313,7 +305,8 @@ static void describe_commit(struct object_id *oid, struct strbuf *dst)
 		/*
 		 * Exact match to an existing ref.
 		 */
-		append_name(n, dst);
+		verify_tag_embedded_name(n);
+		strbuf_addstr(dst, n->path);
 		if (longformat)
 			append_suffix(0, n->tag ? get_tagged_oid(n->tag) : oid, dst);
 		if (suffix)
@@ -447,8 +440,8 @@ static void describe_commit(struct object_id *oid, struct strbuf *dst)
 				oid_to_hex(&gave_up_on->object.oid));
 		}
 	}
-
-	append_name(all_matches[0].name, dst);
+	verify_tag_embedded_name(all_matches[0].name);
+	strbuf_addstr(dst, all_matches[0].name->path);
 	if (abbrev)
 		append_suffix(all_matches[0].depth, &cmit->object.oid, dst);
 	if (suffix)

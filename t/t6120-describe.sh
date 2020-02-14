@@ -129,9 +129,9 @@ test_expect_success 'rename tag A to Q locally' '
 	mv .git/refs/tags/A .git/refs/tags/Q
 '
 cat - >err.expect <<EOF
-warning: tag 'A' is really 'Q' here
+warning: tag 'Q' is externally known as 'A'
 EOF
-check_describe A-* HEAD
+check_describe Q-* HEAD
 test_expect_success 'warning was displayed for Q' '
 	test_i18ncmp err.expect err.actual
 '
