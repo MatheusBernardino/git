@@ -122,6 +122,21 @@ test_gitcomp_nl ()
 	test_cmp expected out
 }
 
+# Test __gitcomp_csv
+# Arguments are:
+# 1: current word (cur)
+# -: the rest are passed to __gitcomp_csv
+test_gitcomp_csv ()
+{
+	local -a COMPREPLY &&
+	sed -e 's/Z$//' >expected &&
+	local cur="$1" &&
+	shift &&
+	__gitcomp_csv "$@" &&
+	print_comp &&
+	test_cmp expected out
+}
+
 invalid_variable_name='${foo.bar}'
 
 actual="$TRASH_DIRECTORY/actual"
@@ -578,6 +593,21 @@ test_expect_success '__gitcomp_nl - no suffix' '
 
 test_expect_success '__gitcomp_nl - doesnt fail because of invalid variable name' '
 	__gitcomp_nl "$invalid_variable_name"
+'
+
+test_expect_success '__gitcomp_csv - display all values' '
+	test_gitcomp_csv "--opt=" "--opt=" "val1 val2 val3" <<-\EOF
+	val1 Z
+	val2 Z
+	val3 Z
+	EOF
+'
+
+test_expect_success '__gitcomp_csv - do not display values in $cur' '
+	test_gitcomp_csv "--opt=val1," "--opt=" "val1 val2 val3" <<-\EOF
+	val1,val2 Z
+	val1,val3 Z
+	EOF
 '
 
 test_expect_success '__git_remotes - list remotes from $GIT_DIR/remotes and from config file' '

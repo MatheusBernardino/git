@@ -476,6 +476,41 @@ __gitcomp_file ()
 	true
 }
 
+# The following function is based on the Stack Exchange answer:
+# https://unix.stackexchange.com/a/176442 (under CC BY-SA 4.0) written
+# by diffycat (https://unix.stackexchange.com/users/17452/diffycat)
+#
+# Call __gitcomp for options that accept a comma separated list of values, i.e.
+# something like '--option=val1,val2'. The caller must have already checked
+# that `$cur == --option=*`. __gitcomp_csv requires two arguments:
+# 1: The option in the format of '--option='
+# 2: The list of possible values for the said option, separated by spaces. Note
+#    that the values cannot contain commas or spaces.
+__gitcomp_csv ()
+{
+	local cur_values="${cur##$1}"
+	local available_values prefix pattern
+
+	if [[ "$cur_values" == *,* ]]
+	then
+		# Filter out already used values from completion reply
+		for value in $2
+		do
+			if ! [[ ",$cur_values," =~ ",$value," ]]
+			then
+				available_values="$available_values $value"
+			fi
+		done
+		prefix="${cur_values%,*},"
+		pattern="${cur_values##*,}"
+	else
+		available_values="$2"
+		pattern="$cur_values"
+	fi
+
+	__gitcomp "$available_values" "$prefix" "$pattern"
+}
+
 # Execute 'git ls-files', unless the --committable option is specified, in
 # which case it runs 'git diff-index' to find out the files that can be
 # committed.  It return paths relative to the directory specified in the first
