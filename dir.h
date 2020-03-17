@@ -186,8 +186,8 @@ struct untracked_cache_dir {
 };
 
 struct untracked_cache {
-	struct oid_stat ss_info_exclude;
-	struct oid_stat ss_excludes_file;
+	struct oid_stat info_exclude_validity;
+	struct oid_stat excludes_file_validity;
 	const char *exclude_per_dir;
 	struct strbuf ident;
 	/*
@@ -334,8 +334,8 @@ struct dir_struct {
 
 	/* Enable untracked file cache if set */
 	struct untracked_cache *untracked;
-	struct oid_stat ss_info_exclude;
-	struct oid_stat ss_excludes_file;
+	struct oid_stat info_exclude_validity;
+	struct oid_stat excludes_file_validity;
 	unsigned unmanaged_exclude_files;
 };
 
