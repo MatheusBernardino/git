@@ -166,9 +166,10 @@ struct oid_stat {
  *  Whenever a file (or a submodule) is added or removed from a
  *  directory, we invalidate that directory.
  *
- *  The remaining inputs are easy, their SHA-1 could be used to verify
- *  their contents (exclude_sha1[], info_exclude_sha1[] and
- *  excludes_file_sha1[])
+ *  The remaining inputs are easy, their OID could be used to verify
+ *  their contents (untracked_cache_dir.exclude_oid,
+ *  untracked_cache.info_exclude_validity.oid and
+ *  untracked_cache.excludes_file_validity.oid)
  */
 struct untracked_cache_dir {
 	struct untracked_cache_dir **dirs;

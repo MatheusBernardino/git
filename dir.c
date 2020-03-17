@@ -2961,7 +2961,8 @@ struct write_data {
 	int index;	   /* number of written untracked_cache_dir */
 	struct ewah_bitmap *check_only; /* from untracked_cache_dir */
 	struct ewah_bitmap *valid;	/* from untracked_cache_dir */
-	struct ewah_bitmap *sha1_valid; /* set if exclude_sha1 is not null */
+	/* set if untracked_cache_dir.exclude_oid is not null */
+	struct ewah_bitmap *sha1_valid;
 	struct strbuf out;
 	struct strbuf sb_stat;
 	struct strbuf sb_sha1;
