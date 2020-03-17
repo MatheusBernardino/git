@@ -56,8 +56,9 @@ int cmd__dump_untracked_cache(int ac, const char **av)
 		printf("no untracked cache\n");
 		return 0;
 	}
-	printf("info/exclude %s\n", oid_to_hex(&uc->ss_info_exclude.oid));
-	printf("core.excludesfile %s\n", oid_to_hex(&uc->ss_excludes_file.oid));
+	printf("info/exclude %s\n", oid_to_hex(&uc->info_exclude_validity.oid));
+	printf("core.excludesfile %s\n",
+	       oid_to_hex(&uc->excludes_file_validity.oid));
 	printf("exclude_per_dir %s\n", uc->exclude_per_dir);
 	printf("flags %08x\n", uc->dir_flags);
 	if (uc->root)

@@ -2613,15 +2613,17 @@ static struct untracked_cache_dir *validate_untracked_cache(struct dir_struct *d
 
 	/* Validate $GIT_DIR/info/exclude and core.excludesfile */
 	root = dir->untracked->root;
-	if (!oideq(&dir->ss_info_exclude.oid,
-		   &dir->untracked->ss_info_exclude.oid)) {
+	if (!oideq(&dir->info_exclude_validity.oid,
+		   &dir->untracked->info_exclude_validity.oid)) {
 		invalidate_gitignore(dir->untracked, root);
-		dir->untracked->ss_info_exclude = dir->ss_info_exclude;
+		dir->untracked->info_exclude_validity =
+			dir->info_exclude_validity;
 	}
-	if (!oideq(&dir->ss_excludes_file.oid,
-		   &dir->untracked->ss_excludes_file.oid)) {
+	if (!oideq(&dir->excludes_file_validity.oid,
+		   &dir->untracked->excludes_file_validity.oid)) {
 		invalidate_gitignore(dir->untracked, root);
-		dir->untracked->ss_excludes_file = dir->ss_excludes_file;
+		dir->untracked->excludes_file_validity =
+			dir->excludes_file_validity;
 	}
 
 	/* Make sure this directory is not dropped out at saving phase */
@@ -2884,14 +2886,16 @@ void setup_standard_excludes(struct dir_struct *dir)
 		excludes_file = xdg_config_home("ignore");
 	if (excludes_file && !access_or_warn(excludes_file, R_OK, 0))
 		add_patterns_from_file_1(dir, excludes_file,
-					 dir->untracked ? &dir->ss_excludes_file : NULL);
+					 dir->untracked ?
+					 &dir->excludes_file_validity : NULL);
 
 	/* per repository user preference */
 	if (startup_info->have_repository) {
 		const char *path = git_path_info_exclude();
 		if (!access_or_warn(path, R_OK, 0))
 			add_patterns_from_file_1(dir, path,
-						 dir->untracked ? &dir->ss_info_exclude : NULL);
+						 dir->untracked ?
+						 &dir->info_exclude_validity : NULL);
 	}
 }
 
@@ -3037,8 +3041,10 @@ void write_untracked_extension(struct strbuf *out, struct untracked_cache *untra
 	const unsigned hashsz = the_hash_algo->rawsz;
 
 	ouc = xcalloc(1, sizeof(*ouc));
-	stat_data_to_disk(&ouc->info_exclude_stat, &untracked->ss_info_exclude.stat);
-	stat_data_to_disk(&ouc->excludes_file_stat, &untracked->ss_excludes_file.stat);
+	stat_data_to_disk(&ouc->info_exclude_stat,
+			  &untracked->info_exclude_validity.stat);
+	stat_data_to_disk(&ouc->excludes_file_stat,
+			  &untracked->excludes_file_validity.stat);
 	ouc->dir_flags = htonl(untracked->dir_flags);
 
 	varint_len = encode_varint(untracked->ident.len, varbuf);
@@ -3046,8 +3052,8 @@ void write_untracked_extension(struct strbuf *out, struct untracked_cache *untra
 	strbuf_addbuf(out, &untracked->ident);
 
 	strbuf_add(out, ouc, sizeof(*ouc));
-	strbuf_add(out, untracked->ss_info_exclude.oid.hash, hashsz);
-	strbuf_add(out, untracked->ss_excludes_file.oid.hash, hashsz);
+	strbuf_add(out, untracked->info_exclude_validity.oid.hash, hashsz);
+	strbuf_add(out, untracked->excludes_file_validity.oid.hash, hashsz);
 	strbuf_add(out, untracked->exclude_per_dir, strlen(untracked->exclude_per_dir) + 1);
 	FREE_AND_NULL(ouc);
 
@@ -3250,10 +3256,10 @@ struct untracked_cache *read_untracked_extension(const void *data, unsigned long
 	uc = xcalloc(1, sizeof(*uc));
 	strbuf_init(&uc->ident, ident_len);
 	strbuf_add(&uc->ident, ident, ident_len);
-	load_oid_stat(&uc->ss_info_exclude,
+	load_oid_stat(&uc->info_exclude_validity,
 		      next + ouc_offset(info_exclude_stat),
 		      next + offset);
-	load_oid_stat(&uc->ss_excludes_file,
+	load_oid_stat(&uc->excludes_file_validity,
 		      next + ouc_offset(excludes_file_stat),
 		      next + offset + hashsz);
 	uc->dir_flags = get_be32(next + ouc_offset(dir_flags));
