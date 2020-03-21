@@ -78,20 +78,8 @@ then
 	exit 1
 fi
 
-# Parse options while taking care to leave $@ intact, so we will still
-# have all the original command line options when executing the test
-# script again for '--tee' and '--verbose-log' below.
-store_arg_to=
-prev_opt=
-for opt
-do
-	if test -n "$store_arg_to"
-	then
-		eval $store_arg_to=\$opt
-		store_arg_to=
-		prev_opt=
-		continue
-	fi
+parse_option () {
+	local opt="$@"
 
 	case "$opt" in
 	-d|--d|--de|--deb|--debu|--debug)
@@ -181,6 +169,36 @@ do
 		*)	# Good.
 			;;
 		esac
+		;;
+	*)
+		echo "error: unknown test option '$opt'" >&2; exit 1 ;;
+	esac
+}
+
+# Parse options while taking care to leave $@ intact, so we will still
+# have all the original command line options when executing the test
+# script again for '--tee' and '--verbose-log' below.
+store_arg_to=
+prev_opt=
+for opt
+do
+	if test -n "$store_arg_to"
+	then
+		eval $store_arg_to=\$opt
+		store_arg_to=
+		prev_opt=
+		continue
+	fi
+
+	case "$opt" in
+	--*)
+		parse_option "$opt" ;;
+	-?*)
+		# stacked short options must be fed separately to parse_option
+		for c in $(echo "${opt#-}" | sed 's/./& /g')
+		do
+			parse_option "-$c"
+		done
 		;;
 	*)
 		echo "error: unknown test option '$opt'" >&2; exit 1 ;;
