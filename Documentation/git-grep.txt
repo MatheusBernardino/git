@@ -65,6 +65,10 @@ OPTIONS
 	mechanism.  Only useful when searching files in the current directory
 	with `--no-index`.
 
+--ignore-sparsity::
+	In a sparse checked out repository (see linkgit:git-sparse-checkout[1]),
+	also search in files that are outside the sparse checkout.
+
 --recurse-submodules::
 	Recursively search in each submodule that has been initialized and
 	checked out in the repository.  When used in combination with the

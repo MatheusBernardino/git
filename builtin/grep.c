@@ -33,6 +33,8 @@ static char const * const grep_usage[] = {
 
 static int recurse_submodules;
 
+static int ignore_sparsity = 0;
+
 static int num_threads;
 
 static pthread_t *threads;
@@ -292,6 +294,9 @@ static int grep_cmd_config(const char *var, const char *value, void *cb)
 	if (!strcmp(var, "submodule.recurse"))
 		recurse_submodules = git_config_bool(var, value);
 
+	if (!strcmp(var, "grep.ignoresparsity"))
+		ignore_sparsity = git_config_bool(var, value);
+
 	return st;
 }
 
@@ -487,7 +492,7 @@ static int grep_cache(struct grep_opt *opt,
 	for (nr = 0; nr < repo->index->cache_nr; nr++) {
 		const struct cache_entry *ce = repo->index->cache[nr];
 
-		if (ce_skip_worktree(ce))
+		if (!ignore_sparsity && ce_skip_worktree(ce))
 			continue;
 
 		strbuf_setlen(&name, name_base_len);
@@ -502,7 +507,8 @@ static int grep_cache(struct grep_opt *opt,
 			 * cache entry are identical, even if worktree file has
 			 * been modified, so use cache version instead
 			 */
-			if (cached || (ce->ce_flags & CE_VALID)) {
+			if (cached || (ce->ce_flags & CE_VALID) ||
+			    ce_skip_worktree(ce)) {
 				if (ce_stage(ce) || ce_intent_to_add(ce))
 					continue;
 				hit |= grep_oid(opt, &ce->oid, name.buf,
@@ -549,7 +555,7 @@ static int grep_tree(struct grep_opt *opt, const struct pathspec *pathspec,
 		name_base_len = name.len;
 	}
 
-	if (from_commit && repo_read_index(repo) < 0)
+	if (!ignore_sparsity && from_commit && repo_read_index(repo) < 0)
 		die(_("index file corrupt"));
 
 	while (tree_entry(tree, &entry)) {
@@ -570,7 +576,7 @@ static int grep_tree(struct grep_opt *opt, const struct pathspec *pathspec,
 
 		strbuf_add(base, entry.path, te_len);
 
-		if (from_commit) {
+		if (!ignore_sparsity && from_commit) {
 			int pos = index_name_pos(repo->index,
 						 base->buf + tn_len,
 						 base->len - tn_len);
@@ -932,6 +938,8 @@ int cmd_grep(int argc, const char **argv, const char *prefix)
 		OPT_BOOL_F(0, "ext-grep", &external_grep_allowed__ignored,
 			   N_("allow calling of grep(1) (ignored by this build)"),
 			   PARSE_OPT_NOCOMPLETE),
+		OPT_BOOL(0, "ignore-sparsity", &ignore_sparsity,
+			 N_("also search in files outside the sparse checkout")),
 		OPT_END()
 	};
 

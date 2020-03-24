@@ -85,4 +85,46 @@ test_expect_success 'grep <tree-ish> should search outside sparse checkout' '
 	test_cmp expect_t-tree actual_t-tree
 '
 
+for cmd in 'git grep --ignore-sparsity' 'git -c grep.ignoreSparsity grep' \
+	   'git -c grep.ignoreSparsity=false grep --ignore-sparsity'
+do
+	test_expect_success "$cmd should search outside sparse checkout" '
+		cat >expect <<-EOF &&
+		a:text
+		b:text
+		dir/c:text
+		EOF
+		$cmd "text" >actual &&
+		test_cmp expect actual
+	'
+
+	test_expect_success "$cmd --cached should search outside sparse checkout" '
+		cat >expect <<-EOF &&
+		a:text
+		b:text
+		dir/c:text
+		EOF
+		$cmd --cached "text" >actual &&
+		test_cmp expect actual
+	'
+
+	test_expect_success "$cmd <commit-ish> should search outside sparse checkout" '
+		commit=$(git rev-parse HEAD) &&
+		cat >expect_commit <<-EOF &&
+		$commit:a:text
+		$commit:b:text
+		$commit:dir/c:text
+		EOF
+		cat >expect_t-commit <<-EOF &&
+		t-commit:a:text
+		t-commit:b:text
+		t-commit:dir/c:text
+		EOF
+		$cmd "text" $commit >actual_commit &&
+		test_cmp expect_commit actual_commit &&
+		$cmd "text" t-commit >actual_t-commit &&
+		test_cmp expect_t-commit actual_t-commit
+	'
+done
+
 test_done
