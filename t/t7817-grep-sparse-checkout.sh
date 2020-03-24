@@ -63,12 +63,27 @@ test_expect_success 'setup' '
 	test_path_is_file sub/B/b
 '
 
+# The two tests bellow check a special case: the sparsity patterns exclude 'b'
+# from the working tree, but the user manually creates a file in the same path.
+# In this case, grep should honor --restrict-to-sparse-paths.
 test_expect_success 'grep in working tree should honor sparse checkout' '
 	cat >expect <<-EOF &&
 	a:text
 	EOF
+	echo newtext >b &&
 	git grep "text" >actual &&
-	test_cmp expect actual
+	test_cmp expect actual &&
+	rm b
+'
+test_expect_success 'grep w/ --no-restrict-to-sparse-paths for paths present in the working tree' '
+	cat >expect <<-EOF &&
+	a:text
+	b:newtext
+	EOF
+	echo newtext >b &&
+	git --no-restrict-to-sparse-paths grep "text" >actual &&
+	test_cmp expect actual &&
+	rm b
 '
 
 test_expect_success 'grep --cached should honor sparse checkout' '
@@ -135,6 +150,66 @@ test_expect_success 'grep --recurse-submodules <commit-ish> should honor sparse 
 	test_cmp expect_commit actual_commit &&
 	git grep --recurse-submodules "text" t-commit >actual_t-commit &&
 	test_cmp expect_t-commit actual_t-commit
+'
+
+for cmd in 'git --no-restrict-to-sparse-paths grep' \
+	   'git -c sparse.restrictCmds=false grep' \
+	   'git -c sparse.restrictCmds=true --no-restrict-to-sparse-paths grep'
+do
+
+	test_expect_success "$cmd --cached should ignore sparsity patterns" '
+		cat >expect <<-EOF &&
+		a:text
+		b:text
+		dir/c:text
+		EOF
+		$cmd --cached "text" >actual &&
+		test_cmp expect actual
+	'
+
+	test_expect_success "$cmd <commit-ish> should ignore sparsity patterns" '
+		commit=$(git rev-parse HEAD) &&
+		cat >expect_commit <<-EOF &&
+		$commit:a:text
+		$commit:b:text
+		$commit:dir/c:text
+		EOF
+		cat >expect_t-commit <<-EOF &&
+		t-commit:a:text
+		t-commit:b:text
+		t-commit:dir/c:text
+		EOF
+		$cmd "text" $commit >actual_commit &&
+		test_cmp expect_commit actual_commit &&
+		$cmd "text" t-commit >actual_t-commit &&
+		test_cmp expect_t-commit actual_t-commit
+	'
+done
+
+test_expect_success 'should respect the sparse.restrictCmds values from submodules' '
+	cat >expect <<-EOF &&
+	a:text
+	sub/A/a:text
+	sub/B/b:text
+	EOF
+	git -C sub config sparse.restrictCmds false &&
+	git grep --cached --recurse-submodules "text" >actual &&
+	test_cmp expect actual &&
+	git -C sub config --unset sparse.restrictCmds
+'
+
+test_expect_success 'should propagate --[no]-restrict-to-sparse-paths to submodules' '
+	cat >expect <<-EOF &&
+	a:text
+	b:text
+	dir/c:text
+	sub/A/a:text
+	sub/B/b:text
+	EOF
+	git -C sub config sparse.restrictCmds true &&
+	git --no-restrict-to-sparse-paths grep --cached --recurse-submodules "text" >actual &&
+	test_cmp expect actual &&
+	git -C sub config --unset sparse.restrictCmds
 '
 
 test_done

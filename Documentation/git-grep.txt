@@ -41,6 +41,9 @@ characters.  An empty string as search expression matches all lines.
 CONFIGURATION
 -------------
 
+git-grep honors the sparse.restrictCmds setting. See its explanation in
+linkgit:git-config[1] for more details.
+
 :git-grep: 1
 include::config/grep.txt[]
 
