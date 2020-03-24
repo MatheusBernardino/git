@@ -38,6 +38,7 @@ const char git_more_info_string[] =
 	   "See 'git help git' for an overview of the system.");
 
 static int use_pager = -1;
+int opt_restrict_to_sparse_paths = -1;
 
 static void list_builtins(struct string_list *list, unsigned int exclude_option);
 
@@ -311,6 +312,10 @@ static int handle_options(const char ***argv, int *argc, int *envchanged)
 			} else {
 				exit(list_cmds(cmd));
 			}
+		} else if (!strcmp(cmd, "--restrict-to-sparse-paths")) {
+			opt_restrict_to_sparse_paths = 1;
+		} else if (!strcmp(cmd, "--no-restrict-to-sparse-paths")) {
+			opt_restrict_to_sparse_paths = 0;
 		} else {
 			fprintf(stderr, _("unknown option: %s\n"), cmd);
 			usage(git_usage_string);
@@ -319,6 +324,7 @@ static int handle_options(const char ***argv, int *argc, int *envchanged)
 		(*argv)++;
 		(*argc)--;
 	}
+
 	return (*argv) - orig_argv;
 }
 
