@@ -72,6 +72,8 @@ test_expect_success setup '
 	# Still a no-op.
 	function dummy() {}
 	EOF
+	echo unusual >"\"unusual\" pathname" &&
+	echo unusual >"t/\"unusual\" pathname2" &&
 	git add . &&
 	test_tick &&
 	git commit -m initial
@@ -481,6 +483,26 @@ do
 		git grep --count -h -e b $H -- ab >actual &&
 		test_cmp expected actual
 	'
+
+	test_expect_success "grep $L should not quote unusual pathnames" '
+		cat >expected <<-EOF &&
+		${HC}"unusual" pathname:unusual
+		${HC}t/"unusual" pathname2:unusual
+		EOF
+		git grep unusual $H >actual &&
+		test_cmp expected actual
+	'
+
+	test_expect_success "grep $L should not quote unusual relative pathnames" '
+		cat >expected <<-EOF &&
+		${HC}"unusual" pathname2:unusual
+		EOF
+		(
+			cd t &&
+			git grep unusual $H
+		) >actual &&
+		test_cmp expected actual
+	'
 done
 
 cat >expected <<EOF
@@ -500,7 +522,8 @@ test_expect_success 'grep -c -C' '
 '
 
 test_expect_success 'grep -L -C' '
-	git ls-files >expected &&
+	git ls-files -z >ls-files-z &&
+	tr "\0" "\n" <ls-files-z >expected &&
 	git grep -L -C1 nonexistent_string >actual &&
 	test_cmp expected actual
 '
@@ -1686,7 +1709,9 @@ test_expect_success 'grep does not report i-t-a with -L --cached' '
 	echo "intend to add this" >intend-to-add &&
 	git add -N intend-to-add &&
 	test_when_finished "git rm -f intend-to-add" &&
-	git ls-files | grep -v "^intend-to-add\$" >expected &&
+	git ls-files -z >ls-files-z &&
+	tr "\0" "\n" <ls-files-z >files &&
+	grep -v "^intend-to-add\$" files >expected &&
 	git grep -L --cached "nonexistent_string" >actual &&
 	test_cmp expected actual
 '
@@ -1696,7 +1721,9 @@ test_expect_success 'grep does not report i-t-a and assume unchanged with -L' '
 	git add -N intend-to-add-assume-unchanged &&
 	test_when_finished "git rm -f intend-to-add-assume-unchanged" &&
 	git update-index --assume-unchanged intend-to-add-assume-unchanged &&
-	git ls-files | grep -v "^intend-to-add-assume-unchanged\$" >expected &&
+	git ls-files -z >ls-files-z &&
+	tr "\0" "\n" <ls-files-z >files &&
+	grep -v "^intend-to-add-assume-unchanged\$" files >expected &&
 	git grep -L "nonexistent_string" >actual &&
 	test_cmp expected actual
 '

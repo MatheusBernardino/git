@@ -303,8 +303,12 @@ static int grep_oid(struct grep_opt *opt, const struct object_id *oid,
 	struct grep_source gs;
 
 	if (opt->relative && opt->prefix_length) {
-		quote_path_relative(filename + tree_name_len, opt->prefix, &pathbuf);
-		strbuf_insert(&pathbuf, 0, filename, tree_name_len);
+		struct strbuf rel_buf = STRBUF_INIT;
+		const char *rel_name = relative_path(filename + tree_name_len,
+						     opt->prefix, &rel_buf);
+		strbuf_add(&pathbuf, filename, tree_name_len);
+		strbuf_addstr(&pathbuf, rel_name);
+		strbuf_release(&rel_buf);
 	} else {
 		strbuf_addstr(&pathbuf, filename);
 	}
@@ -333,13 +337,14 @@ static int grep_file(struct grep_opt *opt, const char *filename)
 {
 	struct strbuf buf = STRBUF_INIT;
 	struct grep_source gs;
+	const char *gs_name;
 
 	if (opt->relative && opt->prefix_length)
-		quote_path_relative(filename, opt->prefix, &buf);
+		gs_name = relative_path(filename, opt->prefix, &buf);
 	else
-		strbuf_addstr(&buf, filename);
+		gs_name = filename;
 
-	grep_source_init(&gs, GREP_SOURCE_FILE, buf.buf, filename, filename);
+	grep_source_init(&gs, GREP_SOURCE_FILE, gs_name, filename, filename);
 	strbuf_release(&buf);
 
 	if (num_threads > 1) {
