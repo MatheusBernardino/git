@@ -1747,8 +1747,9 @@ static int do_git_config_sequence(const struct config_options *opts,
 		ret += git_config_from_file(fn, repo_config, data);
 
 	current_parsing_scope = CONFIG_SCOPE_WORKTREE;
-	if (!opts->ignore_worktree && repository_format_worktree_config) {
-		char *path = git_pathdup("config.worktree");
+	if (!opts->ignore_worktree && repository_format_worktree_config &&
+	    opts->git_dir) {
+		char *path = mkpathdup("%s/config.worktree", opts->git_dir);
 		if (!access_or_die(path, R_OK, 0))
 			ret += git_config_from_file(fn, path, data);
 		free(path);
