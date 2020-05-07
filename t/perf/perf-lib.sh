@@ -128,6 +128,19 @@ test_perf_large_repo () {
 	fi
 	test_perf_create_repo_from "${1:-$TRASH_DIRECTORY}" "$GIT_PERF_LARGE_REPO"
 }
+test_perf_borrow_default_repo () {
+	GIT_PERF_BORROW_REPO=$GIT_PERF_REPO
+	export GIT_PERF_BORROW_REPO
+}
+test_perf_borrow_large_repo () {
+	if test "$GIT_PERF_LARGE_REPO" = "$GIT_BUILD_DIR"; then
+		echo "warning: \$GIT_PERF_LARGE_REPO is \$GIT_BUILD_DIR." >&2
+		echo "warning: This will work, but may not be a sufficiently large repo" >&2
+		echo "warning: for representative measurements." >&2
+	fi
+	GIT_PERF_BORROW_REPO=$GIT_PERF_LARGE_REPO
+	export GIT_PERF_BORROW_REPO
+}
 test_checkout_worktree () {
 	git checkout-index -u -a ||
 	error "git checkout-index failed"

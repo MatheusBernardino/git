@@ -131,6 +131,14 @@ After that you will want to use some of the following:
 
 At least one of the first two is required!
 
+Alternatively, you can create an empty test directory and borrow an
+existing repository.  The exported variable $GIT_PERF_BORROW_REPO will
+be set to the path of the "normal" or "large" repository.  Tests are
+expected to treat this repository as read-only.
+
+	test_perf_borrow_default_repo
+	test_perf_borrow_large_repo
+
 You can use test_expect_success as usual. In both test_expect_success
 and in test_perf, running "git" points to the version that is being
 perf-tested. The $MODERN_GIT variable points to the git wrapper for the
