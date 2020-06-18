@@ -252,8 +252,13 @@ int finish_delayed_checkout(struct checkout *state, int *nr_checkouts)
 	return errs;
 }
 
-static int write_entry(struct cache_entry *ce,
-		       char *path, const struct checkout *state, int to_tempfile)
+/*
+ * On success, return 0 and save the stat info of the just-written file in
+ * st_out. Note: ca is required iff the entry refers to a regular file.
+ */
+static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca,
+		       const struct checkout *state, int to_tempfile,
+		       struct stat *st_out)
 {
 	unsigned int ce_mode_s_ifmt = ce->ce_mode & S_IFMT;
 	struct delayed_checkout *dco = state->delayed_checkout;
@@ -263,19 +268,18 @@ static int write_entry(struct cache_entry *ce,
 	unsigned long size;
 	ssize_t wrote;
 	size_t newsize = 0;
-	struct stat st;
 	const struct submodule *sub;
 	struct checkout_metadata meta;
 
 	clone_checkout_metadata(&meta, &state->meta, &ce->oid);
 
 	if (ce_mode_s_ifmt == S_IFREG) {
-		struct stream_filter *filter = get_stream_filter(state->istate, ce->name,
-								 &ce->oid);
+		struct stream_filter *filter = get_stream_filter_ca(ca, ce->name,
+								    &ce->oid);
 		if (filter &&
 		    !streaming_write_entry(ce, path, filter,
 					   state, to_tempfile,
-					   &fstat_done, &st))
+					   &fstat_done, st_out))
 			goto finish;
 	}
 
@@ -318,14 +322,17 @@ static int write_entry(struct cache_entry *ce,
 		 * Convert from git internal format to working tree format
 		 */
 		if (dco && dco->state != CE_NO_DELAY) {
-			ret = async_convert_to_working_tree(state->istate, ce->name, new_blob,
-							    size, &buf, &meta, dco);
+			ret = async_convert_to_working_tree_ca(ca, ce->name,
+							       new_blob, size,
+							       &buf, &meta, dco);
 			if (ret && string_list_has_string(&dco->paths, ce->name)) {
 				free(new_blob);
 				goto delayed;
 			}
-		} else
-			ret = convert_to_working_tree(state->istate, ce->name, new_blob, size, &buf, &meta);
+		} else {
+			ret = convert_to_working_tree_ca(ca, ce->name, new_blob,
+							 size, &buf, &meta);
+		}
 
 		if (ret) {
 			free(new_blob);
@@ -347,7 +354,7 @@ static int write_entry(struct cache_entry *ce,
 
 		wrote = write_in_full(fd, new_blob, size);
 		if (!to_tempfile)
-			fstat_done = fstat_output(fd, state, &st);
+			fstat_done = fstat_output(fd, state, st_out);
 		close(fd);
 		free(new_blob);
 		if (wrote < 0)
@@ -371,19 +378,22 @@ static int write_entry(struct cache_entry *ce,
 	}
 
 finish:
+	if (state->refresh_cache && !fstat_done && lstat(ce->name, st_out))
+		return error_errno("unable to stat just-written file %s", ce->name);
+delayed:
+	return 0;
+}
+
+static void update_ce_after_write(const struct checkout *state,
+				  struct cache_entry *ce, struct stat *st)
+{
 	if (state->refresh_cache) {
 		assert(state->istate);
-		if (!fstat_done)
-			if (lstat(ce->name, &st) < 0)
-				return error_errno("unable to stat just-written file %s",
-						   ce->name);
-		fill_stat_cache_info(state->istate, ce, &st);
+		fill_stat_cache_info(state->istate, ce, st);
 		ce->ce_flags |= CE_UPDATE_IN_BASE;
 		mark_fsmonitor_invalid(state->istate, ce);
 		state->istate->cache_changed |= CE_ENTRY_CHANGED;
 	}
-delayed:
-	return 0;
 }
 
 /*
@@ -444,6 +454,8 @@ int checkout_entry(struct cache_entry *ce, const struct checkout *state,
 {
 	static struct strbuf path = STRBUF_INIT;
 	struct stat st;
+	struct conv_attrs ca;
+	int ret;
 
 	if (ce->ce_flags & CE_WT_REMOVE) {
 		if (topath)
@@ -456,8 +468,13 @@ int checkout_entry(struct cache_entry *ce, const struct checkout *state,
 		return 0;
 	}
 
-	if (topath)
-		return write_entry(ce, topath, state, 1);
+	if (topath) {
+		if (S_ISREG(ce->ce_mode))
+			convert_attrs(state->istate, &ca, topath);
+		ret = write_entry(ce, topath, &ca, state, 1, &st);
+		update_ce_after_write(state, ce, &st);
+		return ret;
+	}
 
 	strbuf_reset(&path);
 	strbuf_add(&path, state->base_dir, state->base_dir_len);
@@ -521,9 +538,15 @@ int checkout_entry(struct cache_entry *ce, const struct checkout *state,
 		return 0;
 
 	create_directories(path.buf, path.len, state);
+	if (S_ISREG(ce->ce_mode))
+		convert_attrs(state->istate, &ca, path.buf);
+
 	if (nr_checkouts)
 		(*nr_checkouts)++;
-	return write_entry(ce, path.buf, state, 0);
+	ret = write_entry(ce, path.buf, &ca, state, 0, &st);
+	update_ce_after_write(state, ce, &st);
+
+	return ret;
 }
 
 void unlink_entry(const struct cache_entry *ce)
