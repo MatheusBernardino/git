@@ -1,4 +1,5 @@
 #include "cache.h"
+#include "thread-utils.h"
 
 const signed char hexval_table[256] = {
 	 -1, -1, -1, -1, -1, -1, -1, -1,		/* 00-07 */
@@ -136,12 +137,39 @@ char *oid_to_hex_r(char *buffer, const struct object_id *oid)
 	return hash_to_hex_algop_r(buffer, oid->hash, the_hash_algo);
 }
 
+struct hexbuf_array {
+	int bufno;
+	char bufs[4][GIT_MAX_HEXSZ + 1];
+};
+
+static pthread_key_t hexbuf_array_key;
+static pthread_once_t hexbuf_array_once = PTHREAD_ONCE_INIT;
+
+static void init_hexbuf_array_key(void)
+{
+	if (pthread_key_create(&hexbuf_array_key, free))
+		die(_("failed to initialize threads' key for hash to hex conversion"));
+}
+
 char *hash_to_hex_algop(const unsigned char *hash, const struct git_hash_algo *algop)
 {
-	static int bufno;
-	static char hexbuffer[4][GIT_MAX_HEXSZ + 1];
-	bufno = (bufno + 1) % ARRAY_SIZE(hexbuffer);
-	return hash_to_hex_algop_r(hexbuffer[bufno], hash, algop);
+	struct hexbuf_array *ha;
+	void *value;
+
+	if (pthread_once(&hexbuf_array_once, init_hexbuf_array_key))
+		die(_("failed to initialize threads' key for hash to hex conversion"));
+
+	value = pthread_getspecific(hexbuf_array_key);
+	if (value) {
+		ha = (struct hexbuf_array *) value;
+	} else {
+		ha = xmalloc(sizeof(*ha));
+		if (pthread_setspecific(hexbuf_array_key, (void *)ha))
+			die(_("failed to set thread buffer for hash to hex conversion"));
+	}
+
+	ha->bufno = (ha->bufno + 1) % ARRAY_SIZE(ha->bufs);
+	return hash_to_hex_algop_r(ha->bufs[ha->bufno], hash, algop);
 }
 
 char *hash_to_hex(const unsigned char *hash)
