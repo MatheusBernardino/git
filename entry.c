@@ -7,6 +7,7 @@
 #include "progress.h"
 #include "fsmonitor.h"
 #include "entry.h"
+#include "parallel-checkout.h"
 
 static void create_directories(const char *path, int path_len,
 			       const struct checkout *state)
@@ -245,20 +246,9 @@ int finish_delayed_checkout(struct checkout *state, int *nr_checkouts)
 	return errs;
 }
 
-#define WE_SUCCESS 0
-#define WE_GENERIC_ERROR -1
-#define WE_OPEN_ERROR -2
-#define WE_SYMLINK_ERROR -3
-
-/*
- * On success, return 0 and save the stat info of the just-written file in
- * st_out. Otherwise, an error code is returned. On errors other than
- * WE_GENERIC_ERROR, errno will contain the error cause. Note: ca is required
- * iff the entry refers to a regular file.
- */
-static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca,
-		       const struct checkout *state, int to_tempfile,
-		       struct stat *st_out)
+int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca,
+		const struct checkout *state, int to_tempfile,
+		struct stat *st_out)
 {
 	unsigned int ce_mode_s_ifmt = ce->ce_mode & S_IFMT;
 	struct delayed_checkout *dco = state->delayed_checkout;
@@ -285,7 +275,13 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 		fd = open_output_fd(path, ce, to_tempfile);
 		if (fd < 0) {
 			saved_errno = errno;
-			error_errno("unable to create file %s", path);
+			/*
+			 * If parallel checkout is running, we don't want to
+			 * print an error yet, as it will retry writing this
+			 * entry later. (Same bellow, on symlink error)
+			 */
+			if (parallel_checkout_status != PC_RUNNING)
+				error_errno("unable to create file %s", path);
 			errno = saved_errno;
 			return WE_OPEN_ERROR;
 		}
@@ -307,7 +303,8 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 		free(new_blob);
 		if (ret) {
 			saved_errno = errno;
-			error_errno("unable to create symlink %s", path);
+			if (parallel_checkout_status != PC_RUNNING)
+				error_errno("unable to create symlink %s", path);
 			errno = saved_errno;
 			return WE_SYMLINK_ERROR;
 		}
@@ -404,8 +401,8 @@ delayed:
 	return WE_SUCCESS;
 }
 
-static void update_ce_after_write(const struct checkout *state,
-				  struct cache_entry *ce, struct stat *st)
+void update_ce_after_write(const struct checkout *state, struct cache_entry *ce,
+			   struct stat *st)
 {
 	if (state->refresh_cache) {
 		assert(state->istate);
@@ -491,6 +488,11 @@ int checkout_entry(struct cache_entry *ce, const struct checkout *state,
 	if (topath) {
 		if (S_ISREG(ce->ce_mode))
 			convert_attrs(state->istate, &ca, topath);
+
+		if (parallel_checkout_status == PC_ACCEPTING_ENTRIES &&
+		    !enqueue_checkout(ce, topath, &ca, 1))
+			return 0;
+
 		ret = write_entry(ce, topath, &ca, state, 1, &st);
 		update_ce_after_write(state, ce, &st);
 		return ret;
@@ -563,6 +565,11 @@ int checkout_entry(struct cache_entry *ce, const struct checkout *state,
 
 	if (nr_checkouts)
 		(*nr_checkouts)++;
+
+	if (parallel_checkout_status == PC_ACCEPTING_ENTRIES &&
+	    !enqueue_checkout(ce, path.buf, &ca, 0))
+		return 0;
+
 	ret = write_entry(ce, path.buf, &ca, state, 0, &st);
 	update_ce_after_write(state, ce, &st);
 
