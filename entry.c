@@ -7,6 +7,7 @@
 #include "progress.h"
 #include "fsmonitor.h"
 #include "entry.h"
+#include "parallel-checkout.h"
 
 static void create_directories(const char *path, int path_len,
 			       const struct checkout *state)
@@ -537,6 +538,9 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 		convert_attrs(state->istate, &ca_buf, ce->name);
 		ca = &ca_buf;
 	}
+
+	if (!enqueue_checkout(ce, ca))
+		return 0;
 
 	return write_entry(ce, path.buf, ca, state, 0);
 }
