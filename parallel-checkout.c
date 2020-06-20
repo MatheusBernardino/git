@@ -2,6 +2,7 @@
 #include "entry.h"
 #include "object-store.h"
 #include "parallel-checkout.h"
+#include "thread-utils.h"
 
 enum ci_status {
 	CI_PENDING = 0,
@@ -159,6 +160,10 @@ static int handle_results(void)
 	return ret;
 }
 
+struct work_batch {
+	size_t start, size;
+};
+
 /*
  * Returns true if write_entry() is likely to have failed due to a path
  * collision (e.g. case-sensitive files in case-insensitive file systems). A
@@ -174,12 +179,12 @@ static int handle_results(void)
 	((we_error == WE_OPEN_ERROR || we_error == WE_SYMLINK_ERROR) && \
 	 (errnum == EEXIST || errnum == ENOENT || errnum == ENOTDIR))
 
-static int run_checkout_sequentially(void)
+static void write_batch(struct work_batch *batch)
 {
-	size_t i;
 	struct checkout *state = parallel_checkout->state;
+	size_t i, end = batch->start + batch->size;
 
-	for (i = 0; i < parallel_checkout->nr; ++i) {
+	for (i = batch->start; i < end; ++i) {
 		struct checkout_item *ci = &parallel_checkout->items[i];
 		struct stat *st = &ci->st_out;
 
@@ -193,22 +198,72 @@ static int run_checkout_sequentially(void)
 		else
 			ci->status = CI_FAILED;
 	}
+}
 
+static int run_checkout_sequentially(void)
+{
+	struct work_batch batch = {.start = 0, .size = parallel_checkout->nr};
+	write_batch(&batch);
 	return handle_results();
 }
 
+static void *checkout_thread(void *arg)
+{
+	struct work_batch *batch = arg;
+	write_batch(batch);
+	free(batch);
+	return NULL;
+}
 
 int run_parallel_checkout(void)
 {
-	int err;
+	int i, threads_with_one_extra_item, ret = 0;
+	size_t base_batch_size, next_to_assign = 0;
+	pthread_t *threads;
+	int num_threads = online_cpus();
+	int min_limit = 0;
 
 	if (!parallel_checkout)
 		BUG("cannot run parallel checkout: not initialized yet");
 
 	parallel_checkout_status = PC_RUNNING;
 
-	err = run_checkout_sequentially();
+	if (parallel_checkout->nr == 0) {
+		goto done;
+	} else if (parallel_checkout->nr < min_limit || num_threads == 1) {
+		ret = run_checkout_sequentially();
+		goto done;
+	}
 
+	base_batch_size = parallel_checkout->nr / num_threads;
+	threads_with_one_extra_item = parallel_checkout->nr % num_threads;
+	ALLOC_ARRAY(threads, num_threads);
+
+	enable_obj_read_lock();
+	for (i = 0; i < num_threads; ++i) {
+		struct work_batch *batch = xmalloc(sizeof(*batch));
+		size_t batch_size = base_batch_size;
+
+		/* distribute the extra work evenly */
+		if (i < threads_with_one_extra_item)
+			batch_size++;
+
+		batch->start = next_to_assign;
+		batch->size = batch_size;
+		next_to_assign += batch_size;
+
+		if (pthread_create(&threads[i], NULL, checkout_thread, batch))
+			die(_("failed to create thread at parallel checkout"));
+	}
+
+	for (i = 0; i < num_threads; ++i)
+		pthread_join(threads[i], NULL);
+
+	disable_obj_read_lock();
+
+	ret = handle_results();
+
+done:
 	finish_parallel_checkout();
-	return err;
+	return ret;
 }
