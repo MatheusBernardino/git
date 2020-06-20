@@ -1,22 +1,9 @@
 #include "cache.h"
 #include "entry.h"
 #include "parallel-checkout.h"
+#include "pkt-line.h"
+#include "run-command.h"
 #include "streaming.h"
-
-enum ci_status {
-	CI_PENDING = 0,
-	CI_SUCCESS,
-	CI_RETRY,
-	CI_FAILED,
-};
-
-struct checkout_item {
-	/* pointer to a istate->cache[] entry. Not owned by us. */
-	struct cache_entry *ce;
-	struct conv_attrs ca;
-	struct stat st;
-	enum ci_status status;
-};
 
 struct parallel_checkout {
 	struct checkout_item *items;
@@ -24,15 +11,12 @@ struct parallel_checkout {
 };
 
 static struct parallel_checkout *parallel_checkout = NULL;
-
-enum pc_status {
-	PC_UNINITIALIZED = 0,
-	PC_ACCEPTING_ENTRIES,
-	PC_RUNNING,
-	PC_HANDLING_RESULTS,
-};
-
 static enum pc_status pc_status = PC_UNINITIALIZED;
+
+enum pc_status parallel_checkout_status(void)
+{
+	return pc_status;
+}
 
 void init_parallel_checkout(void)
 {
@@ -113,9 +97,11 @@ int enqueue_checkout(struct cache_entry *ce, struct conv_attrs *ca)
 	ALLOC_GROW(parallel_checkout->items, parallel_checkout->nr + 1,
 		   parallel_checkout->alloc);
 
-	ci = &parallel_checkout->items[parallel_checkout->nr++];
+	ci = &parallel_checkout->items[parallel_checkout->nr];
 	ci->ce = ce;
 	memcpy(&ci->ca, ca, sizeof(ci->ca));
+	ci->id = parallel_checkout->nr;
+	parallel_checkout->nr++;
 
 	return 0;
 }
@@ -200,7 +186,8 @@ static int write_checkout_item_to_fd(int fd, struct checkout *state,
 	/*
 	 * checkout metadata is used to give context for external process
 	 * filters. Files requiring such filters are not eligible for parallel
-	 * checkout, so pass NULL.
+	 * checkout, so pass NULL. Note: if that changes, the metadata must also
+	 * be passed from the main process to the workers.
 	 */
 	ret = convert_to_working_tree_ca(&ci->ca, ci->ce->name, new_blob, size,
 					 &buf, NULL);
@@ -241,14 +228,14 @@ static int check_leading_dirs(const char *path, int len, int prefix_len)
 	return has_dirs_only_path(path, slash - path, prefix_len);
 }
 
-static void write_checkout_item(struct checkout *state, struct checkout_item *ci)
+void write_checkout_item(struct checkout *state, struct checkout_item *ci)
 {
 	unsigned int mode = (ci->ce->ce_mode & 0100) ? 0777 : 0666;
 	int fd = -1, fstat_done = 0;
 	struct strbuf path = STRBUF_INIT;
 
 	strbuf_add(&path, state->base_dir, state->base_dir_len);
-	strbuf_add(&path, ci->ce->name, ce_namelen(ci->ce));
+	strbuf_add(&path, ci->ce->name, ci->ce->ce_namelen);
 
 	/*
 	 * At this point, leading dirs should have already been created. But if
@@ -311,30 +298,214 @@ out:
 	strbuf_release(&path);
 }
 
+static void send_one_item(int fd, struct checkout_item *ci)
+{
+	size_t len_data;
+	char *data, *variant;
+	struct ci_fixed_portion *fixed_portion;
+	const char *working_tree_encoding = ci->ca.working_tree_encoding;
+	size_t name_len = ci->ce->ce_namelen;
+	size_t working_tree_encoding_len = working_tree_encoding ?
+					   strlen(working_tree_encoding) : 0;
+
+	len_data = sizeof(struct ci_fixed_portion) + name_len +
+		   working_tree_encoding_len;
+
+	data = xcalloc(1, len_data);
+
+	fixed_portion = (struct ci_fixed_portion *)data;
+	fixed_portion->id = ci->id;
+	oidcpy(&fixed_portion->oid, &ci->ce->oid);
+	fixed_portion->ce_mode = ci->ce->ce_mode;
+	fixed_portion->attr_action = ci->ca.attr_action;
+	fixed_portion->crlf_action = ci->ca.crlf_action;
+	fixed_portion->ident = ci->ca.ident;
+	fixed_portion->name_len = name_len;
+	fixed_portion->working_tree_encoding_len = working_tree_encoding_len;
+
+	variant = data + sizeof(*fixed_portion);
+	if (working_tree_encoding_len) {
+		memcpy(variant, working_tree_encoding, working_tree_encoding_len);
+		variant += working_tree_encoding_len;
+	}
+	memcpy(variant, ci->ce->name, name_len);
+
+	packet_write(fd, data, len_data);
+
+	free(data);
+}
+
+static void send_batch(int fd, size_t start, size_t nr)
+{
+	size_t i;
+	for (i = 0; i < nr; ++i)
+		send_one_item(fd, &parallel_checkout->items[start + i]);
+	packet_flush(fd);
+}
+
+static struct child_process *setup_workers(struct checkout *state, int num_workers)
+{
+	struct child_process *workers;
+	int i, workers_with_one_extra_item;
+	size_t base_batch_size, next_to_assign = 0;
+
+	base_batch_size = parallel_checkout->nr / num_workers;
+	workers_with_one_extra_item = parallel_checkout->nr % num_workers;
+	ALLOC_ARRAY(workers, num_workers);
+
+	for (i = 0; i < num_workers; ++i) {
+		struct child_process *cp = &workers[i];
+		size_t batch_size = base_batch_size;
+
+		child_process_init(cp);
+		cp->git_cmd = 1;
+		cp->in = -1;
+		cp->out = -1;
+		strvec_push(&cp->args, "checkout--helper");
+		if (state->base_dir_len)
+			strvec_pushf(&cp->args, "--prefix=%s", state->base_dir);
+		if (start_command(cp))
+			die(_("failed to spawn checkout worker"));
+
+		/* distribute the extra work evenly */
+		if (i < workers_with_one_extra_item)
+			batch_size++;
+
+		send_batch(cp->in, next_to_assign, batch_size);
+		next_to_assign += batch_size;
+	}
+
+	return workers;
+}
+
+static void finish_workers(struct child_process *workers, int num_workers)
+{
+	int i;
+	for (i = 0; i < num_workers; ++i) {
+		struct child_process *w = &workers[i];
+		if (w->in >= 0)
+			close(w->in);
+		if (w->out >= 0)
+			close(w->out);
+		if (finish_command(w))
+			die(_("checkout worker finished with error"));
+	}
+	free(workers);
+}
+
+static void parse_and_save_result(const char *line, int len)
+{
+	struct ci_result *res;
+	struct checkout_item *ci;
+
+	/*
+	 * Worker should send either the full result struct or just the base
+	 * (i.e. no stat data).
+	 */
+	if (len != ci_result_base_size() && len != sizeof(struct ci_result))
+		BUG("received corrupted item from checkout worker");
+
+	res = (struct ci_result *)line;
+
+	if (res->id > parallel_checkout->nr)
+		BUG("checkout worker sent unknown item id");
+
+	ci = &parallel_checkout->items[res->id];
+	ci->status = res->status;
+
+	/*
+	 * Worker only sends stat data on success. Otherwise, we *cannot* access
+	 * res->st as that will be an invalid address.
+	 */
+	if (res->status == CI_SUCCESS)
+		ci->st = res->st;
+}
+
+static void gather_results_from_workers(struct child_process *workers,
+					int num_workers)
+{
+	int i, active_workers = num_workers;
+	struct pollfd *pfds;
+
+	CALLOC_ARRAY(pfds, num_workers);
+	for (i = 0; i < num_workers; ++i) {
+		pfds[i].fd = workers[i].out;
+		pfds[i].events = POLLIN;
+	}
+
+	while (active_workers) {
+		int nr = poll(pfds, num_workers, -1);
+
+		if (nr < 0) {
+			if (errno == EINTR)
+				continue;
+			die_errno("failed to poll checkout workers");
+		}
+
+		for (i = 0; i < num_workers && nr > 0; ++i) {
+			struct pollfd *pfd = &pfds[i];
+
+			if (!pfd->revents)
+				continue;
+
+			if (pfd->revents & POLLIN) {
+				int len;
+				const char *line = packet_read_line(pfd->fd, &len);
+
+				if (!line) {
+					pfd->fd = -1;
+					active_workers--;
+				} else {
+					parse_and_save_result(line, len);
+				}
+			} else if (pfd->revents & POLLHUP) {
+				pfd->fd = -1;
+				active_workers--;
+			} else if (pfd->revents & (POLLNVAL | POLLERR)) {
+				die(_("error polling from checkout worker"));
+			}
+
+			nr--;
+		}
+	}
+
+	free(pfds);
+}
+
 static int run_checkout_sequentially(struct checkout *state)
 {
 	size_t i;
-
-	for (i = 0; i < parallel_checkout->nr; ++i) {
-		struct checkout_item *ci = &parallel_checkout->items[i];
-		write_checkout_item(state, ci);
-	}
-
+	for (i = 0; i < parallel_checkout->nr; ++i)
+		write_checkout_item(state, &parallel_checkout->items[i]);
 	return handle_results(state);
 }
 
+static const int workers_threshold = 0;
 
 int run_parallel_checkout(struct checkout *state)
 {
-	int ret;
+	int num_workers = online_cpus();
+	int ret = 0;
+	struct child_process *workers;
 
 	if (!parallel_checkout)
 		BUG("cannot run parallel checkout: not initialized yet");
 
 	pc_status = PC_RUNNING;
 
-	ret = run_checkout_sequentially(state);
+	if (parallel_checkout->nr == 0) {
+		goto done;
+	} else if (parallel_checkout->nr < workers_threshold || num_workers == 1) {
+		ret = run_checkout_sequentially(state);
+		goto done;
+	}
 
+	workers = setup_workers(state, num_workers);
+	gather_results_from_workers(workers, num_workers);
+	finish_workers(workers, num_workers);
+	ret = handle_results(state);
+
+done:
 	finish_parallel_checkout();
 	return ret;
 }

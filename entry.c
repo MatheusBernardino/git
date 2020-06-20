@@ -427,8 +427,17 @@ static void mark_colliding_entries(const struct checkout *state,
 	for (i = 0; i < state->istate->cache_nr; i++) {
 		struct cache_entry *dup = state->istate->cache[i];
 
-		if (dup == ce)
-			break;
+		if (dup == ce) {
+			/*
+			 * Parallel checkout creates the files in a racy order.
+			 * So the other side of the collision may appear after
+			 * the given cache_entry in the array.
+			 */
+			if (parallel_checkout_status() == PC_HANDLING_RESULTS)
+				continue;
+			else
+				break;
+		}
 
 		if (dup->ce_flags & (CE_MATCHED | CE_VALID | CE_SKIP_WORKTREE))
 			continue;
