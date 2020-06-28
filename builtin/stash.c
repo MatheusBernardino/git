@@ -1,6 +1,7 @@
 #define USE_THE_INDEX_COMPATIBILITY_MACROS
 #include "builtin.h"
 #include "config.h"
+#include "entry.h"
 #include "parse-options.h"
 #include "refs.h"
 #include "lockfile.h"
