@@ -16,3 +16,19 @@ will checkout the '<something>' branch on another remote,
 and by linkgit:git-worktree[1] when 'git worktree add' refers to a
 remote branch. This setting might be used for other checkout-like
 commands or functionality in the future.
+
+checkout.workers::
+	The number of worker processes to use when updating the working tree.
+	If unset (or set to a value less than one), Git will use as many
+	workers as the number of logical cores available. One means sequential
+	execution. This setting and checkout.thresholdForParallelism affect all
+	commands which perform checkout. E.g. checkout, switch, clone,
+	checkout-index, sparse-checkout, read-tree, etc.
+
+checkout.thresholdForParallelism::
+	If set to a positive number, parallel checkout will not be attempted
+	when the number of files to be updated is less than the defined limit.
+	When set to a negative number or unset, defaults to 0. The reasoning
+	behind this config is that, when modifying a small number of files, a
+	sequential execution might be faster, as it avoids the cost of
+	subprocess spawning and inter-process communication.
