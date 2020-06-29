@@ -4,6 +4,8 @@
 #include "pkt-line.h"
 #include "run-command.h"
 #include "streaming.h"
+#include "thread-utils.h"
+#include "config.h"
 
 struct parallel_checkout {
 	struct checkout_item *items;
@@ -16,6 +18,19 @@ static enum pc_status pc_status = PC_UNINITIALIZED;
 enum pc_status parallel_checkout_status(void)
 {
 	return pc_status;
+}
+
+#define DEFAULT_WORKERS_THRESHOLD 0
+
+void get_parallel_checkout_configs(int *num_workers, int *threshold)
+{
+	if (git_config_get_int("checkout.workers", num_workers) ||
+	    *num_workers < 1)
+		*num_workers = online_cpus();
+
+	if (git_config_get_int("checkout.workersThreshold", threshold) ||
+	    *threshold < 0)
+		*threshold = DEFAULT_WORKERS_THRESHOLD;
 }
 
 void init_parallel_checkout(void)
@@ -480,22 +495,23 @@ static int run_checkout_sequentially(struct checkout *state)
 	return handle_results(state);
 }
 
-static const int workers_threshold = 0;
-
-int run_parallel_checkout(struct checkout *state)
+int run_parallel_checkout(struct checkout *state, int num_workers, int threshold)
 {
-	int num_workers = online_cpus();
 	int ret = 0;
 	struct child_process *workers;
 
 	if (!parallel_checkout)
 		BUG("cannot run parallel checkout: not initialized yet");
 
+	if (num_workers < 1)
+		BUG("invalid number of workers for run_parallel_checkout: %d",
+		    num_workers);
+
 	pc_status = PC_RUNNING;
 
 	if (parallel_checkout->nr == 0) {
 		goto done;
-	} else if (parallel_checkout->nr < workers_threshold || num_workers == 1) {
+	} else if (parallel_checkout->nr < threshold || num_workers == 1) {
 		ret = run_checkout_sequentially(state);
 		goto done;
 	}
