@@ -245,9 +245,16 @@ int finish_delayed_checkout(struct checkout *state, int *nr_checkouts)
 	return errs;
 }
 
+#define WE_SUCCESS 0
+#define WE_GENERIC_ERROR -1
+#define WE_OPEN_ERROR -2
+#define WE_SYMLINK_ERROR -3
+
 /*
  * On success, return 0 and save the stat info of the just-written file in
- * st_out. Note: ca is required iff the entry refers to a regular file.
+ * st_out. Otherwise, an error code is returned. On errors other than
+ * WE_GENERIC_ERROR, errno will contain the error cause. Note: ca is required
+ * iff the entry refers to a regular file.
  */
 static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca,
 		       const struct checkout *state, int to_tempfile,
@@ -265,6 +272,7 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 	struct checkout_metadata meta;
 	struct stream_filter *filter;
 	int write_symlink_as_reg = 0;
+	int saved_errno;
 
 	/*
 	 * We can't make a real symlink; write out a regular file entry
@@ -275,24 +283,34 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 
 	if (ce_mode_s_ifmt == S_IFREG || write_symlink_as_reg) {
 		fd = open_output_fd(path, ce, to_tempfile);
-		if (fd < 0)
-			return error_errno("unable to create file %s", path);
+		if (fd < 0) {
+			saved_errno = errno;
+			error_errno("unable to create file %s", path);
+			errno = saved_errno;
+			return WE_OPEN_ERROR;
+		}
 	}
 
 	switch (ce_mode_s_ifmt) {
 	case S_IFLNK:
 		new_blob = read_blob_entry(ce, &size);
-		if (!new_blob)
-			return error("unable to read sha1 file of %s (%s)",
-				     path, oid_to_hex(&ce->oid));
+		if (!new_blob) {
+			error("unable to read sha1 file of %s (%s)",
+			      path, oid_to_hex(&ce->oid));
+			return WE_GENERIC_ERROR;
+		}
 
 		if (write_symlink_as_reg)
 			goto write_file_entry;
 
 		ret = symlink(new_blob, path);
 		free(new_blob);
-		if (ret)
-			return error_errno("unable to create symlink %s", path);
+		if (ret) {
+			saved_errno = errno;
+			error_errno("unable to create symlink %s", path);
+			errno = saved_errno;
+			return WE_SYMLINK_ERROR;
+		}
 		break;
 
 	case S_IFREG:
@@ -310,9 +328,11 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 			size = 0;
 		} else {
 			new_blob = read_blob_entry(ce, &size);
-			if (!new_blob)
-				return error("unable to read sha1 file of %s (%s)",
-					     path, oid_to_hex(&ce->oid));
+			if (!new_blob) {
+				error("unable to read sha1 file of %s (%s)",
+				      path, oid_to_hex(&ce->oid));
+				return WE_GENERIC_ERROR;
+			}
 		}
 
 		/*
@@ -349,31 +369,39 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 			fstat_done = fstat_output(fd, state, st_out);
 		close(fd);
 		free(new_blob);
-		if (wrote < 0)
-			return error("unable to write file %s", path);
+		if (wrote < 0) {
+			error("unable to write file %s", path);
+			return WE_GENERIC_ERROR;
+		}
 		break;
 
 	case S_IFGITLINK:
-		if (to_tempfile)
-			return error("cannot create temporary submodule %s", path);
-		if (mkdir(path, 0777) < 0)
-			return error("cannot create submodule directory %s", path);
+		if (to_tempfile) {
+			error("cannot create temporary submodule %s", path);
+			return WE_GENERIC_ERROR;
+		}
+		if (mkdir(path, 0777) < 0) {
+			error("cannot create submodule directory %s", path);
+			return WE_GENERIC_ERROR;
+		}
 		sub = submodule_from_ce(ce);
-		if (sub)
-			return submodule_move_head(ce->name,
-				NULL, oid_to_hex(&ce->oid),
-				state->force ? SUBMODULE_MOVE_HEAD_FORCE : 0);
+		if (sub && submodule_move_head(ce->name, NULL, oid_to_hex(&ce->oid),
+				state->force ? SUBMODULE_MOVE_HEAD_FORCE : 0))
+			return WE_GENERIC_ERROR;
 		break;
 
 	default:
-		return error("unknown file mode for %s in index", path);
+		error("unknown file mode for %s in index", path);
+		return WE_GENERIC_ERROR;
 	}
 
 finish:
-	if (state->refresh_cache && !fstat_done && lstat(ce->name, st_out))
-		return error_errno("unable to stat just-written file %s", ce->name);
+	if (state->refresh_cache && !fstat_done && lstat(ce->name, st_out)) {
+		error_errno("unable to stat just-written file %s", ce->name);
+		return WE_GENERIC_ERROR;
+	}
 delayed:
-	return 0;
+	return WE_SUCCESS;
 }
 
 static void update_ce_after_write(const struct checkout *state,
