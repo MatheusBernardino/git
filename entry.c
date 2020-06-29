@@ -120,24 +120,17 @@ static int fstat_output(int fd, const struct checkout *state, struct stat *st)
 	return 0;
 }
 
-static int streaming_write_entry(const struct cache_entry *ce, char *path,
+static int streaming_write_entry(const struct cache_entry *ce, int fd,
 				 struct stream_filter *filter,
 				 const struct checkout *state, int to_tempfile,
 				 int *fstat_done, struct stat *statbuf)
 {
 	int result = 0;
-	int fd;
-
-	fd = open_output_fd(path, ce, to_tempfile);
-	if (fd < 0)
-		return -1;
 
 	result |= stream_blob_to_fd(fd, &ce->oid, filter, 1);
 	*fstat_done = fstat_output(fd, state, statbuf);
 	result |= close(fd);
 
-	if (result)
-		unlink(path);
 	return result;
 }
 
@@ -262,7 +255,7 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 {
 	unsigned int ce_mode_s_ifmt = ce->ce_mode & S_IFMT;
 	struct delayed_checkout *dco = state->delayed_checkout;
-	int fd, ret, fstat_done = 0;
+	int ret, fstat_done = 0, fd = -1;
 	char *new_blob;
 	struct strbuf buf = STRBUF_INIT;
 	unsigned long size;
@@ -270,17 +263,20 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 	size_t newsize = 0;
 	const struct submodule *sub;
 	struct checkout_metadata meta;
+	struct stream_filter *filter;
+	int write_symlink_as_reg = 0;
 
-	clone_checkout_metadata(&meta, &state->meta, &ce->oid);
+	/*
+	 * We can't make a real symlink; write out a regular file entry
+	 * with the symlink destination as its contents.
+	 */
+	if (ce_mode_s_ifmt == S_IFLNK && (!has_symlinks || to_tempfile))
+		write_symlink_as_reg = 1;
 
-	if (ce_mode_s_ifmt == S_IFREG) {
-		struct stream_filter *filter = get_stream_filter_ca(ca, ce->name,
-								    &ce->oid);
-		if (filter &&
-		    !streaming_write_entry(ce, path, filter,
-					   state, to_tempfile,
-					   &fstat_done, st_out))
-			goto finish;
+	if (ce_mode_s_ifmt == S_IFREG || write_symlink_as_reg) {
+		fd = open_output_fd(path, ce, to_tempfile);
+		if (fd < 0)
+			return error_errno("unable to create file %s", path);
 	}
 
 	switch (ce_mode_s_ifmt) {
@@ -290,11 +286,7 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 			return error("unable to read sha1 file of %s (%s)",
 				     path, oid_to_hex(&ce->oid));
 
-		/*
-		 * We can't make a real symlink; write out a regular file entry
-		 * with the symlink destination as its contents.
-		 */
-		if (!has_symlinks || to_tempfile)
+		if (write_symlink_as_reg)
 			goto write_file_entry;
 
 		ret = symlink(new_blob, path);
@@ -304,6 +296,11 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 		break;
 
 	case S_IFREG:
+		filter = get_stream_filter_ca(ca, ce->name, &ce->oid);
+		if (filter &&
+		    !streaming_write_entry(ce, fd, filter, state, to_tempfile,
+					   &fstat_done, st_out))
+			goto finish;
 		/*
 		 * We do not send the blob in case of a retry, so do not
 		 * bother reading it at all.
@@ -321,6 +318,7 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 		/*
 		 * Convert from git internal format to working tree format
 		 */
+		clone_checkout_metadata(&meta, &state->meta, &ce->oid);
 		if (dco && dco->state != CE_NO_DELAY) {
 			ret = async_convert_to_working_tree_ca(ca, ce->name,
 							       new_blob, size,
@@ -346,12 +344,6 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 		 */
 
 	write_file_entry:
-		fd = open_output_fd(path, ce, to_tempfile);
-		if (fd < 0) {
-			free(new_blob);
-			return error_errno("unable to create file %s", path);
-		}
-
 		wrote = write_in_full(fd, new_blob, size);
 		if (!to_tempfile)
 			fstat_done = fstat_output(fd, state, st_out);
