@@ -3,6 +3,7 @@
 #include "object-store.h"
 #include "parallel-checkout.h"
 #include "thread-utils.h"
+#include "config.h"
 
 enum ci_status {
 	CI_PENDING = 0,
@@ -30,6 +31,19 @@ struct parallel_checkout {
 
 static struct parallel_checkout *parallel_checkout = NULL;
 enum pc_status parallel_checkout_status;
+
+#define DEFAULT_MIN_LIMIT_FOR_THREADS 0
+
+void get_parallel_checkout_configs(int *num_threads, int *min_limit)
+{
+	if (git_config_get_int("checkout.threads", num_threads) ||
+	    *num_threads < 1)
+		*num_threads = online_cpus();
+
+	if (git_config_get_int("checkout.minlimitforthreads", min_limit) ||
+	    *min_limit < 0)
+		*min_limit = DEFAULT_MIN_LIMIT_FOR_THREADS;
+}
 
 void init_parallel_checkout(struct checkout *state)
 {
@@ -215,16 +229,18 @@ static void *checkout_thread(void *arg)
 	return NULL;
 }
 
-int run_parallel_checkout(void)
+int run_parallel_checkout(int num_threads, int min_limit)
 {
 	int i, threads_with_one_extra_item, ret = 0;
 	size_t base_batch_size, next_to_assign = 0;
 	pthread_t *threads;
-	int num_threads = online_cpus();
-	int min_limit = 0;
 
 	if (!parallel_checkout)
 		BUG("cannot run parallel checkout: not initialized yet");
+
+	if (num_threads < 1)
+		BUG("invalid number of threads for run_parallel_checkout: %d",
+		    num_threads);
 
 	parallel_checkout_status = PC_RUNNING;
 

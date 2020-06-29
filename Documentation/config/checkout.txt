@@ -16,3 +16,19 @@ will checkout the '<something>' branch on another remote,
 and by linkgit:git-worktree[1] when 'git worktree add' refers to a
 remote branch. This setting might be used for other checkout-like
 commands or functionality in the future.
+
+checkout.threads::
+	The number of threads to spawn when updating the working tree. If unset
+	(or set to a value less than 1), Git will use as many threads as the
+	number of logical cores available. This and the
+	checkout.minLimitForThreads settings affect all commands which might
+	perform checkouts. E.g. checkout, switch, sparse-checkout, read-tree,
+	clone, etc.
+
+checkout.minLimitForThreads::
+	If set to a positive number, parallel checkout will not be attempted
+	when the number of files to be updated is less than the defined limit.
+	When set to a negative number or unset, defaults to 10. The reasoning
+	behind this config is that, for checkouts only modifying a small number
+	of files, a sequential execution might be faster (as it avoids the cost
+	of spawning threads).

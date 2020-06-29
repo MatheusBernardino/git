@@ -14,6 +14,12 @@ enum pc_status {
 
 extern enum pc_status parallel_checkout_status;
 
+/*
+ * Reads the checkout.threads and checkout.minLimitForThreads configs. Invalid
+ * values are replaced with the default ones.
+ */
+void get_parallel_checkout_configs(int *num_threads, int *min_limit);
+
 void init_parallel_checkout(struct checkout *state);
 
 /*
@@ -25,11 +31,12 @@ int enqueue_checkout(struct cache_entry *ce, char *path, struct conv_attrs *ca,
 		     int to_tempfile);
 
 /*
- * Write all the queued entries, returning 0 on success. The internal parallel
- * checkout data is freed before return, making it ready for another
- * init_parallel_checkout() call. It's a bug to call this function without
- * previously initializing the parallel checkout machinery.
+ * Write all the queued entries, returning 0 on success. If that are less than
+ * min_limit entries in the queue, the operation is performed sequentially.
+ * The internal parallel checkout data is freed before return, making it ready
+ * for another init_parallel_checkout() call. It's a bug to call this function
+ * without previously initializing the parallel checkout machinery.
  */
-int run_parallel_checkout(void);
+int run_parallel_checkout(int num_threads, int min_limit);
 
 #endif /* PARALLEL_CHECKOUT_H */

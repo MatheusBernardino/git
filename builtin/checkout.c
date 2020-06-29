@@ -359,17 +359,21 @@ static int checkout_worktree(const struct checkout_opts *opts,
 	int nr_checkouts = 0, nr_unmerged = 0;
 	int errs = 0;
 	int pos;
+	int pc_num_threads, pc_min_limit;
 
 	state.force = 1;
 	state.refresh_cache = 1;
 	state.istate = &the_index;
+
+	get_parallel_checkout_configs(&pc_num_threads, &pc_min_limit);
 
 	init_checkout_metadata(&state.meta, info->refname,
 			       info->commit ? &info->commit->object.oid : &info->oid,
 			       NULL);
 
 	enable_delayed_checkout(&state);
-	init_parallel_checkout(&state);
+	if (pc_num_threads > 1)
+		init_parallel_checkout(&state);
 	for (pos = 0; pos < active_nr; pos++) {
 		struct cache_entry *ce = active_cache[pos];
 		if (ce->ce_flags & CE_MATCHED) {
@@ -389,7 +393,8 @@ static int checkout_worktree(const struct checkout_opts *opts,
 			pos = skip_same_name(ce, pos) - 1;
 		}
 	}
-	errs |= run_parallel_checkout();
+	if (pc_num_threads > 1)
+		errs |= run_parallel_checkout(pc_num_threads, pc_min_limit);
 	remove_marked_cache_entries(&the_index, 1);
 	remove_scheduled_dirs();
 	errs |= finish_delayed_checkout(&state, &nr_checkouts);

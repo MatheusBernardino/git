@@ -399,7 +399,7 @@ static int check_updates(struct unpack_trees_options *o,
 	int errs = 0;
 	struct progress *progress;
 	struct checkout state = CHECKOUT_INIT;
-	int i;
+	int i, pc_num_threads, pc_min_limit;
 
 	trace_performance_enter();
 	state.force = 1;
@@ -462,8 +462,11 @@ static int check_updates(struct unpack_trees_options *o,
 		oid_array_clear(&to_fetch);
 	}
 
+	get_parallel_checkout_configs(&pc_num_threads, &pc_min_limit);
+
 	enable_delayed_checkout(&state);
-	init_parallel_checkout(&state);
+	if (pc_num_threads > 1)
+		init_parallel_checkout(&state);
 	for (i = 0; i < index->cache_nr; i++) {
 		struct cache_entry *ce = index->cache[i];
 
@@ -477,7 +480,8 @@ static int check_updates(struct unpack_trees_options *o,
 		}
 	}
 	stop_progress(&progress);
-	errs |= run_parallel_checkout();
+	if (pc_num_threads > 1)
+		errs |= run_parallel_checkout(pc_num_threads, pc_min_limit);
 	errs |= finish_delayed_checkout(&state, NULL);
 	git_attr_set_direction(GIT_ATTR_CHECKIN);
 
