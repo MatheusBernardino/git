@@ -18,7 +18,7 @@
 #define pthread_t int
 #define pthread_mutex_t int
 #define pthread_cond_t int
-#define pthread_key_t int
+#define pthread_key_t void *
 #define pthread_once_t int
 
 #define pthread_mutex_init(mutex, attr) dummy_pthread_init(mutex)
@@ -32,6 +32,20 @@
 #define pthread_cond_broadcast(cond)
 #define pthread_cond_destroy(cond)
 
+/*
+ * The destructor is not used in this case as the main thread will only
+ * exit when the program terminates.
+ */
+#define pthread_key_create(key_ptr, unused) return_0((*key_ptr) = NULL)
+#define pthread_setspecific(key, value) return_0((key) = (value))
+#define pthread_getspecific(key) (key)
+#define pthread_key_delete(key) return_0(NULL)
+
+static inline int return_0(void *unused)
+{
+	return 0;
+}
+
 #define pthread_key_create(key, attr) dummy_pthread_init(key)
 #define pthread_key_delete(key)
 
@@ -39,9 +53,6 @@
 	dummy_pthread_create(thread, attr, fn, data)
 #define pthread_join(thread, retval) \
 	dummy_pthread_join(thread, retval)
-
-#define pthread_setspecific(key, data)
-#define pthread_getspecific(key) NULL
 
 int dummy_pthread_create(pthread_t *pthread, const void *attr,
 			 void *(*fn)(void *), void *data);
