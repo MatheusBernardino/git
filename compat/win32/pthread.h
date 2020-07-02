@@ -77,22 +77,22 @@ static inline void NORETURN pthread_exit(void *ret)
 typedef DWORD pthread_key_t;
 static inline int pthread_key_create(pthread_key_t *keyp, void (*destructor)(void *value))
 {
-	return (*keyp = TlsAlloc()) == TLS_OUT_OF_INDEXES ? EAGAIN : 0;
+	return (*keyp = FlsAlloc(destructor)) == FLS_OUT_OF_INDEXES ? EAGAIN : 0;
 }
 
 static inline int pthread_key_delete(pthread_key_t key)
 {
-	return TlsFree(key) ? 0 : EINVAL;
+	return FlsFree(key) ? 0 : EINVAL;
 }
 
 static inline int pthread_setspecific(pthread_key_t key, const void *value)
 {
-	return TlsSetValue(key, (void *)value) ? 0 : EINVAL;
+	return FlsSetValue(key, (void *)value) ? 0 : EINVAL;
 }
 
 static inline void *pthread_getspecific(pthread_key_t key)
 {
-	return TlsGetValue(key);
+	return FlsGetValue(key);
 }
 
 #ifndef __MINGW64_VERSION_MAJOR
