@@ -56,3 +56,77 @@ pthread_t pthread_self(void)
 	t.tid = GetCurrentThreadId();
 	return t;
 }
+
+struct fls_entry {
+	void *value;
+	key_destructor_fn *destructor;
+};
+
+static void fls_entry_destructor(void *arg)
+{
+	struct fls_entry *entry = arg;
+	key_destructor_fn destructor = *entry->destructor;
+
+	if (entry->value && destructor)
+		destructor(entry->value);
+
+	free(entry);
+}
+
+int pthread_key_create(pthread_key_t *keyp, key_destructor_fn fn)
+{
+	DWORD index = FlsAlloc(fls_entry_destructor);
+
+	if (index == FLS_OUT_OF_INDEXES)
+		return EAGAIN;
+
+	keyp->destructor = xmalloc(sizeof(*keyp->destructor));
+	*keyp->destructor = fn;
+	keyp->index = index;
+	return 0;
+}
+
+int pthread_key_delete(pthread_key_t key)
+{
+	int ret;
+	/*
+	 * POSIX specifies that: "No destructor functions shall be invoked by
+	 * pthread_key_delete(). Any destructor function that may have been
+	 * associated with key shall no longer be called upon thread exit."
+	 */
+	*key.destructor = NULL;
+	ret = FlsFree(key.index) ? 0 : EINVAL;
+	free(key.destructor);
+	return ret;
+}
+
+int pthread_setspecific(pthread_key_t key, const void *value)
+{
+	struct fls_entry *entry = FlsGetValue(key.index);
+
+	if (!entry)
+		entry = xmalloc(sizeof(*entry));
+
+	if (!FlsSetValue(key.index, entry)) {
+		free(entry);
+		return EINVAL;
+	}
+
+	/*
+	 * We fill the entry after the FlsSetValue() call so that if the key
+	 * wasn't initialized yet, we will return early and not try to read the
+	 * destructor address (which would be invalid).
+	 */
+	entry->value = (void *)value;
+	entry->destructor = key.destructor;
+
+	return 0;
+}
+
+void *pthread_getspecific(pthread_key_t key)
+{
+	struct fls_entry *entry = FlsGetValue(key.index);
+	if (entry)
+		return entry->value;
+	return NULL;
+}

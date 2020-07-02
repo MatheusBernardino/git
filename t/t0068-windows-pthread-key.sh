@@ -16,7 +16,7 @@ test_expect_success MINGW,PTHREADS 'pthread_getspecific can retrieve a set value
 	test_cmp expect actual
 '
 
-test_expect_failure MINGW,PTHREADS 'destructor callback is called on thread exit' '
+test_expect_success MINGW,PTHREADS 'destructor callback is called on thread exit' '
 	cat >expect <<-EOF &&
 	VALUE
 	destructor received "VALUE"

@@ -69,26 +69,17 @@ static inline void NORETURN pthread_exit(void *ret)
 	ExitThread((DWORD)(intptr_t)ret);
 }
 
-typedef DWORD pthread_key_t;
-static inline int pthread_key_create(pthread_key_t *keyp, void (*destructor)(void *value))
-{
-	return (*keyp = TlsAlloc()) == TLS_OUT_OF_INDEXES ? EAGAIN : 0;
-}
+typedef void (*key_destructor_fn)(void *value);
 
-static inline int pthread_key_delete(pthread_key_t key)
-{
-	return TlsFree(key) ? 0 : EINVAL;
-}
+typedef struct {
+	DWORD index;
+	key_destructor_fn *destructor;
+} pthread_key_t;
 
-static inline int pthread_setspecific(pthread_key_t key, const void *value)
-{
-	return TlsSetValue(key, (void *)value) ? 0 : EINVAL;
-}
-
-static inline void *pthread_getspecific(pthread_key_t key)
-{
-	return TlsGetValue(key);
-}
+int pthread_key_create(pthread_key_t *keyp, key_destructor_fn fn);
+int pthread_key_delete(pthread_key_t key);
+int pthread_setspecific(pthread_key_t key, const void *value);
+void *pthread_getspecific(pthread_key_t key);
 
 #ifndef __MINGW64_VERSION_MAJOR
 static inline int pthread_sigmask(int how, const sigset_t *set, sigset_t *oset)
