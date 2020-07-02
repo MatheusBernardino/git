@@ -69,26 +69,18 @@ static inline void NORETURN pthread_exit(void *ret)
 	ExitThread((DWORD)(intptr_t)ret);
 }
 
-typedef DWORD pthread_key_t;
-static inline int pthread_key_create(pthread_key_t *keyp, void (*destructor)(void *value))
-{
-	return (*keyp = TlsAlloc()) == TLS_OUT_OF_INDEXES ? EAGAIN : 0;
-}
+typedef struct {
+	DWORD index;
+	void (*destructor)(void *value);
+} pthread_key_t;
 
-static inline int pthread_key_delete(pthread_key_t key)
-{
-	return TlsFree(key) ? 0 : EINVAL;
-}
+int pthread_key_create(pthread_key_t *keyp, void (*destructor)(void *value));
+#define pthread_key_delete(key) do_pthread_key_delete(&(key))
+#define pthread_setspecific(key, value) do_pthread_setspecific(&(key), value)
+void *pthread_getspecific(pthread_key_t key);
 
-static inline int pthread_setspecific(pthread_key_t key, const void *value)
-{
-	return TlsSetValue(key, (void *)value) ? 0 : EINVAL;
-}
-
-static inline void *pthread_getspecific(pthread_key_t key)
-{
-	return TlsGetValue(key);
-}
+int do_pthread_key_delete(pthread_key_t *key);
+int do_pthread_setspecific(pthread_key_t *key, const void *value);
 
 #ifndef __MINGW64_VERSION_MAJOR
 static inline int pthread_sigmask(int how, const sigset_t *set, sigset_t *oset)
