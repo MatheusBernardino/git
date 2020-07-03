@@ -72,6 +72,7 @@ static struct test_cmd cmds[] = {
 	{ "wildmatch", cmd__wildmatch },
 #ifdef GIT_WINDOWS_NATIVE
 	{ "windows-named-pipe", cmd__windows_named_pipe },
+	{ "windows-pthread-key", cmd__windows_pthread_key },
 #endif
 	{ "write-cache", cmd__write_cache },
 };
