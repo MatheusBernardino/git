@@ -62,6 +62,7 @@ int cmd__xml_encode(int argc, const char **argv);
 int cmd__wildmatch(int argc, const char **argv);
 #ifdef GIT_WINDOWS_NATIVE
 int cmd__windows_named_pipe(int argc, const char **argv);
+int cmd__windows_pthread_key(int argc, const char **argv);
 #endif
 int cmd__write_cache(int argc, const char **argv);
 
