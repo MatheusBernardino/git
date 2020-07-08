@@ -109,13 +109,23 @@ static int open_output_fd(char *path, const struct cache_entry *ce, int to_tempf
 	}
 }
 
+static inline int lstat_written_entry(const struct cache_entry *ce,
+			       const struct checkout *state, struct stat *st)
+{
+	if (state->refresh_cache) {
+		if (lstat(ce->name, st) < 0)
+			return error_errno("unable to stat just-written file %s",
+					   ce->name);
+	}
+	return 0;
+}
+
 static int fstat_output(int fd, const struct checkout *state, struct stat *st)
 {
 	/* use fstat() only when path == ce->name */
 	if (fstat_is_reliable() &&
 	    state->refresh_cache && !state->base_dir_len) {
-		fstat(fd, st);
-		return 1;
+		return fstat(fd, st);
 	}
 	return 0;
 }
@@ -123,9 +133,9 @@ static int fstat_output(int fd, const struct checkout *state, struct stat *st)
 static int streaming_write_entry(const struct cache_entry *ce, char *path,
 				 struct stream_filter *filter,
 				 const struct checkout *state, int to_tempfile,
-				 int *fstat_done, struct stat *statbuf)
+				 struct stat *statbuf)
 {
-	int result = 0;
+	int fstat_done = 0, result = 0;
 	int fd;
 
 	fd = open_output_fd(path, ce, to_tempfile);
@@ -133,11 +143,14 @@ static int streaming_write_entry(const struct cache_entry *ce, char *path,
 		return -1;
 
 	result |= stream_blob_to_fd(fd, &ce->oid, filter, 1);
-	*fstat_done = fstat_output(fd, state, statbuf);
+	fstat_done = fstat_output(fd, state, statbuf);
 	result |= close(fd);
 
-	if (result)
+	if (result) {
 		unlink(path);
+	} else if (!fstat_done)
+		return lstat_written_entry(ce, state, statbuf);	
+
 	return result;
 }
 
@@ -252,32 +265,123 @@ int finish_delayed_checkout(struct checkout *state, int *nr_checkouts)
 	return errs;
 }
 
+static void update_ce_after_write(const struct checkout *state,
+				  struct cache_entry *ce, struct stat *st)
+{
+	if (state->refresh_cache) {
+		assert(state->istate);
+		fill_stat_cache_info(state->istate, ce, st);
+		ce->ce_flags |= CE_UPDATE_IN_BASE;
+		mark_fsmonitor_invalid(state->istate, ce);
+		state->istate->cache_changed |= CE_ENTRY_CHANGED;
+	}
+}
+
+static int write_buffer(const char *buf, unsigned long size,
+			struct cache_entry *ce, char *path,
+			const struct checkout *state,
+			int to_tempfile, struct stat *st_out)
+{
+	int fstat_done = 0;
+	ssize_t wrote;
+	int fd = open_output_fd(path, ce, to_tempfile);
+
+	if (fd < 0)
+		return error_errno("unable to create file %s", path);
+
+	wrote = write_in_full(fd, buf, size);
+	if (!to_tempfile)
+		fstat_done = fstat_output(fd, state, st_out);
+	close(fd);
+	if (wrote < 0)
+		return error("unable to write file %s", path);
+
+	if (!fstat_done)
+		return lstat_written_entry(ce, state, st_out);
+
+	return 0;
+}
+
+/* TODO: define enum (or #define) for error codes? */
+/* Return 0 on success write, -1 on error and -2 on delayed */
+static int write_regular_file_entry(struct cache_entry *ce, char *path,
+				    const struct checkout *state,
+				    int to_tempfile, struct stat *st_out)
+{
+	int ret;
+	struct delayed_checkout *dco = state->delayed_checkout;
+	struct stream_filter *filter;
+	struct strbuf buf = STRBUF_INIT;
+	char *new_blob;
+	unsigned long size;
+	size_t newsize = 0;
+	struct checkout_metadata meta;
+
+	assert(S_ISREG(ce->ce_mode));
+
+	filter = get_stream_filter(state->istate, ce->name, &ce->oid);
+	if (filter && !streaming_write_entry(ce, path, filter, state,
+					     to_tempfile, st_out))
+		return 0;
+
+	/*
+	 * We do not send the blob in case of a retry, so do not
+	 * bother reading it at all.
+	 */
+	if (dco && dco->state == CE_RETRY) {
+		new_blob = NULL;
+		size = 0;
+	} else {
+		new_blob = read_blob_entry(ce, &size);
+		if (!new_blob)
+			return error("unable to read sha1 file of %s (%s)",
+				     path, oid_to_hex(&ce->oid));
+	}
+
+	/*
+	 * Convert from git internal format to working tree format
+	 */
+
+	clone_checkout_metadata(&meta, &state->meta, &ce->oid);
+
+	if (dco && dco->state != CE_NO_DELAY) {
+		ret = async_convert_to_working_tree(state->istate, ce->name, new_blob,
+						    size, &buf, &meta, dco);
+		if (ret && string_list_has_string(&dco->paths, ce->name)) {
+			free(new_blob);
+			return -2;
+		}
+	} else
+		ret = convert_to_working_tree(state->istate, ce->name, new_blob, size, &buf, &meta);
+
+	if (ret) {
+		free(new_blob);
+		new_blob = strbuf_detach(&buf, &newsize);
+		size = newsize;
+	}
+	/*
+	 * No "else" here as errors from convert are OK at this
+	 * point. If the error would have been fatal (e.g.
+	 * filter is required), then we would have died already.
+	 */
+
+	if (write_buffer(new_blob, size, ce, path, state, to_tempfile, st_out)) {
+		free(new_blob);
+		return -1;
+	}
+
+	return 0;
+}
+
 static int write_entry(struct cache_entry *ce,
 		       char *path, const struct checkout *state, int to_tempfile)
 {
 	unsigned int ce_mode_s_ifmt = ce->ce_mode & S_IFMT;
-	struct delayed_checkout *dco = state->delayed_checkout;
-	int fd, ret, fstat_done = 0;
+	int ret;
 	char *new_blob;
-	struct strbuf buf = STRBUF_INIT;
 	unsigned long size;
-	ssize_t wrote;
-	size_t newsize = 0;
 	struct stat st;
 	const struct submodule *sub;
-	struct checkout_metadata meta;
-
-	clone_checkout_metadata(&meta, &state->meta, &ce->oid);
-
-	if (ce_mode_s_ifmt == S_IFREG) {
-		struct stream_filter *filter = get_stream_filter(state->istate, ce->name,
-								 &ce->oid);
-		if (filter &&
-		    !streaming_write_entry(ce, path, filter,
-					   state, to_tempfile,
-					   &fstat_done, &st))
-			goto finish;
-	}
 
 	switch (ce_mode_s_ifmt) {
 	case S_IFLNK:
@@ -290,68 +394,28 @@ static int write_entry(struct cache_entry *ce,
 		 * We can't make a real symlink; write out a regular file entry
 		 * with the symlink destination as its contents.
 		 */
-		if (!has_symlinks || to_tempfile)
-			goto write_file_entry;
-
-		ret = symlink(new_blob, path);
-		free(new_blob);
-		if (ret)
-			return error_errno("unable to create symlink %s", path);
+		if (!has_symlinks || to_tempfile) {
+			ret = write_buffer(new_blob, size, ce, path, state,
+					   to_tempfile, &st);
+			free(new_blob);
+			if (ret)
+				return -1;
+		} else {
+			ret = symlink(new_blob, path);
+			free(new_blob);
+			if (ret)
+				return error_errno("unable to create symlink %s", path);
+			if (lstat_written_entry(ce, state, &st))
+				return -1;
+		}
 		break;
 
 	case S_IFREG:
-		/*
-		 * We do not send the blob in case of a retry, so do not
-		 * bother reading it at all.
-		 */
-		if (dco && dco->state == CE_RETRY) {
-			new_blob = NULL;
-			size = 0;
-		} else {
-			new_blob = read_blob_entry(ce, &size);
-			if (!new_blob)
-				return error("unable to read sha1 file of %s (%s)",
-					     path, oid_to_hex(&ce->oid));
-		}
-
-		/*
-		 * Convert from git internal format to working tree format
-		 */
-		if (dco && dco->state != CE_NO_DELAY) {
-			ret = async_convert_to_working_tree(state->istate, ce->name, new_blob,
-							    size, &buf, &meta, dco);
-			if (ret && string_list_has_string(&dco->paths, ce->name)) {
-				free(new_blob);
-				goto delayed;
-			}
-		} else
-			ret = convert_to_working_tree(state->istate, ce->name, new_blob, size, &buf, &meta);
-
-		if (ret) {
-			free(new_blob);
-			new_blob = strbuf_detach(&buf, &newsize);
-			size = newsize;
-		}
-		/*
-		 * No "else" here as errors from convert are OK at this
-		 * point. If the error would have been fatal (e.g.
-		 * filter is required), then we would have died already.
-		 */
-
-	write_file_entry:
-		fd = open_output_fd(path, ce, to_tempfile);
-		if (fd < 0) {
-			free(new_blob);
-			return error_errno("unable to create file %s", path);
-		}
-
-		wrote = write_in_full(fd, new_blob, size);
-		if (!to_tempfile)
-			fstat_done = fstat_output(fd, state, &st);
-		close(fd);
-		free(new_blob);
-		if (wrote < 0)
-			return error("unable to write file %s", path);
+		ret = write_regular_file_entry(ce, path, state, to_tempfile, &st);
+		if (ret == -2)
+			return 0;
+		else if (ret)
+			return -1;
 		break;
 
 	case S_IFGITLINK:
@@ -364,25 +428,16 @@ static int write_entry(struct cache_entry *ce,
 			return submodule_move_head(ce->name,
 				NULL, oid_to_hex(&ce->oid),
 				state->force ? SUBMODULE_MOVE_HEAD_FORCE : 0);
+
+		if (lstat_written_entry(ce, state, &st))
+				return -1;
 		break;
 
 	default:
 		return error("unknown file mode for %s in index", path);
 	}
 
-finish:
-	if (state->refresh_cache) {
-		assert(state->istate);
-		if (!fstat_done)
-			if (lstat(ce->name, &st) < 0)
-				return error_errno("unable to stat just-written file %s",
-						   ce->name);
-		fill_stat_cache_info(state->istate, ce, &st);
-		ce->ce_flags |= CE_UPDATE_IN_BASE;
-		mark_fsmonitor_invalid(state->istate, ce);
-		state->istate->cache_changed |= CE_ENTRY_CHANGED;
-	}
-delayed:
+	update_ce_after_write(state, ce, &st);
 	return 0;
 }
 
