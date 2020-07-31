@@ -473,7 +473,7 @@ static int check_updates(struct unpack_trees_options *o,
 		}
 	}
 	stop_progress(&progress);
-	errs |= finish_delayed_checkout(&state, NULL);
+	errs |= finish_delayed_checkout(&state);
 	git_attr_set_direction(GIT_ATTR_CHECKIN);
 
 	if (o->clone)

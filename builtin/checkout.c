@@ -388,7 +388,7 @@ static int checkout_worktree(const struct checkout_opts *opts,
 	}
 	remove_marked_cache_entries(&the_index, 1);
 	remove_scheduled_dirs();
-	errs |= finish_delayed_checkout(&state, &nr_checkouts);
+	errs |= finish_delayed_checkout(&state);
 
 	if (opts->count_checkout_paths) {
 		if (nr_unmerged)

@@ -1712,7 +1712,7 @@ struct checkout {
 #define TEMPORARY_FILENAME_LENGTH 25
 int checkout_entry(struct cache_entry *ce, const struct checkout *state, char *topath, int *nr_checkouts);
 void enable_delayed_checkout(struct checkout *state);
-int finish_delayed_checkout(struct checkout *state, int *nr_checkouts);
+int finish_delayed_checkout(struct checkout *state);
 /*
  * Unlink the last component and schedule the leading directories for
  * removal, such that empty directories get removed.
