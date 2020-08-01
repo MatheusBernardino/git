@@ -625,6 +625,11 @@ int run_parallel_checkout(struct checkout *state, int num_workers, int threshold
 		struct pc_worker *workers = setup_workers(state, num_workers);
 		gather_results_from_workers(workers, num_workers);
 		finish_workers(workers, num_workers);
+		/*
+		 * Workers might have created leading dirs, so the cache must be
+		 * invalidated.
+		 */
+		reset_default_lstat_cache();
 	}
 
 	ret |= handle_results(state);
