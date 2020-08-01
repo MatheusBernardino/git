@@ -185,6 +185,9 @@ static int handle_results(struct checkout *state)
 
 	pc_status = PC_HANDLING_RESULTS;
 
+	/* Workers might have created dirs, so the cache must be invalidated */
+	reset_default_lstat_cache();
+
 	for (i = 0; i < parallel_checkout->nr; ++i) {
 		struct checkout_item *ci = &parallel_checkout->items[i];
 		struct stat *st = &ci->st;
