@@ -626,6 +626,9 @@ int run_parallel_checkout(struct checkout *state, int num_workers, int threshold
 		finish_workers(workers, num_workers);
 	}
 
+	/* We might have created leading dirs, so the cache must be reset. */
+	reset_default_lstat_cache();
+
 	ret |= handle_results(state);
 	ret |= checkout_symlink_queue(state);
 
