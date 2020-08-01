@@ -14,6 +14,7 @@ static void create_directories(const char *path, int path_len,
 {
 	char *buf = xmallocz(path_len);
 	int len = 0;
+	int reset_cache = 0;
 
 	while (len < path_len) {
 		do {
@@ -31,7 +32,7 @@ static void create_directories(const char *path, int path_len,
 		 * we test the path components of the prefix with the
 		 * stat() function instead of the lstat() function.
 		 */
-		if (has_dirs_only_path(buf, len, state->base_dir_len))
+		if (has_dirs_only_path(buf, len, state->base_dir_len) > 0)
 			continue; /* ok, it is already a directory. */
 
 		/*
@@ -45,8 +46,14 @@ static void create_directories(const char *path, int path_len,
 			    !unlink_or_warn(buf) && !mkdir(buf, 0777))
 				continue;
 			die_errno("cannot create directory at '%s'", buf);
+		} else {
+			/* The cache had FL_NOENT, but we now created a dir */
+			reset_cache = 1;
 		}
 	}
+
+	if (reset_cache)
+		reset_default_lstat_cache();
 	free(buf);
 }
 
@@ -406,7 +413,7 @@ static int check_path(const char *path, int len, struct stat *st, int skiplen)
 
 	while (path < slash && !is_dir_sep(*slash))
 		slash--;
-	if (!has_dirs_only_path(path, slash - path, skiplen)) {
+	if (has_dirs_only_path(path, slash - path, skiplen) <= 0) {
 		errno = ENOENT;
 		return -1;
 	}
