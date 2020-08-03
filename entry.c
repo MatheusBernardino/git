@@ -477,6 +477,15 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 		return write_entry(ce, topath, ca, state, 1);
 	}
 
+	/*
+	 * For each entry in the parallel-checkout queue, we've checked that the
+	 * leading directories are not symlinks. To keep this invariant, we
+	 * cannot checkout symlinks until these entries are written. Otherwise,
+	 * the symlink could collide with one of the directories and replace it.
+	 */
+	if (S_ISLNK(ce->ce_mode) && !postpone_symlink_checkout(ce, nr_checkouts))
+		return 0;
+
 	strbuf_reset(&path);
 	strbuf_add(&path, state->base_dir, state->base_dir_len);
 	strbuf_add(&path, ce->name, ce_namelen(ce));
