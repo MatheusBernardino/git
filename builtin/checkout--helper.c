@@ -30,7 +30,7 @@ static void packet_to_ci(char *line, int len, struct checkout_item *ci)
 	}
 
 	memset(ci, 0, sizeof(*ci));
-	ci->ce = make_empty_transient_cache_entry(fixed_portion->name_len);
+	ci->ce = make_empty_transient_cache_entry(fixed_portion->name_len, NULL);
 	ci->ce->ce_namelen = fixed_portion->name_len;
 	ci->ce->ce_mode = fixed_portion->ce_mode;
 	memcpy(ci->ce->name, variant, ci->ce->ce_namelen);
