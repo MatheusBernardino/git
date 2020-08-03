@@ -27,8 +27,20 @@ int enqueue_checkout(struct cache_entry *ce, struct conv_attrs *ca);
 size_t pc_queue_size(void);
 
 /*
- * Write all the queued entries, returning 0 on success. If the number of
- * entries is smaller than the specified threshold, the operation is performed
+ * Enqueues a symlink to be checked out *sequentially* after the parallel
+ * checkout finishes. This is done to avoid path collisions among the symlinks
+ * and the leading dirs of parallel-checkout entries (which could lead the
+ * workers to write files in the wrong place). Returns 0 if the symlink was
+ * enqueued or -1 to indicate that the symlink's checkout should not be
+ * postponed.
+ */
+int postpone_symlink_checkout(struct cache_entry *ce, int *checkout_cnt);
+size_t symlink_queue_size(void);
+
+/*
+ * Write all entries from the parallel-checkout queue and the symlink queue,
+ * returning 0 on success. If the number of entries in the parallel checkout
+ * queue is smaller than the specified threshold, the operation is performed
  * sequentially.
  */
 int run_parallel_checkout(struct checkout *state, int num_workers, int threshold,

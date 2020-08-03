@@ -472,6 +472,7 @@ static int check_updates(struct unpack_trees_options *o,
 
 		if (ce->ce_flags & CE_UPDATE) {
 			size_t last_pc_queue_size = pc_queue_size();
+			size_t last_symlink_queue_size = symlink_queue_size();
 
 			if (ce->ce_flags & CE_WT_REMOVE)
 				BUG("both update and delete flags are set on %s",
@@ -479,7 +480,8 @@ static int check_updates(struct unpack_trees_options *o,
 			ce->ce_flags &= ~CE_UPDATE;
 			errs |= checkout_entry(ce, &state, NULL, NULL);
 
-			if (last_pc_queue_size == pc_queue_size())
+			if (last_pc_queue_size == pc_queue_size() &&
+			    last_symlink_queue_size == symlink_queue_size())
 				display_progress(progress, ++cnt);
 		}
 	}
