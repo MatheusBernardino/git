@@ -57,6 +57,43 @@ static void create_directories(const char *path, int path_len,
 	free(buf);
 }
 
+static void remove_non_dirs(const char *path, int path_len,
+			    const struct checkout *state)
+{
+	char *buf = xmallocz(path_len);
+	int len = 0;
+
+	while (len < path_len) {
+		int ret;
+
+		do {
+			buf[len] = path[len];
+			len++;
+		} while (len < path_len && !is_dir_sep(path[len]));
+		if (len >= path_len)
+			break;
+		buf[len] = 0;
+
+		ret = has_dirs_only_path(buf, len, state->base_dir_len);
+
+		if (ret > 0)
+			continue; /* Is directory. */
+		if (ret < 0)
+			break; /* No entry */
+
+		/* ret == 0: not a directory, let's unlink it. */
+
+		if (!state->force)
+			die("'%s' already exists, and it's not a directory", buf);
+
+		if (unlink(buf))
+			die_errno("cannot unlink '%s'", buf);
+		else
+			break;
+	}
+	free(buf);
+}
+
 static void remove_subtree(struct strbuf *path)
 {
 	DIR *dir = opendir(path->buf);
@@ -551,8 +588,6 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 	} else if (state->not_new)
 		return 0;
 
-	create_directories(path.buf, path.len, state);
-
 	if (nr_checkouts)
 		(*nr_checkouts)++;
 
@@ -561,9 +596,13 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 		ca = &ca_buf;
 	}
 
-	if (!enqueue_checkout(ce, ca))
+	if (!enqueue_checkout(ce, ca)) {
+		/* "clean" path so that workers can create leading dirs */
+		remove_non_dirs(path.buf, path.len, state);
 		return 0;
+	}
 
+	create_directories(path.buf, path.len, state);
 	return write_entry(ce, path.buf, ca, state, 0);
 }
 
