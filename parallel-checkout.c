@@ -336,21 +336,49 @@ static int close_and_clear(int *fd)
 	return ret;
 }
 
+struct pc_open_data {
+	int fd;
+	unsigned int mode;
+};
+
+static int pc_open(const char *path, void *cb)
+{
+	struct pc_open_data *data = cb;
+	data->fd = open(path, O_WRONLY | O_CREAT | O_EXCL, data->mode);
+
+	if (data->fd < 0) {
+		/*
+		 * EISDIR can only indicate path collisions among the entries
+		 * being checked out. We don't need raceproof_create_file() to
+		 * try removing empty dirs. Instead, just let the caller known
+		 * that the path already exists, so that the collision can be
+		 * properly handled later.
+		 */
+		if (errno == EISDIR)
+			errno = EEXIST;
+		return 1;
+	}
+
+	return 0;
+}
+
 void write_pc_item(struct parallel_checkout_item *pc_item,
 		   struct checkout *state)
 {
-	unsigned int mode = (pc_item->ce->ce_mode & 0100) ? 0777 : 0666;
+	struct pc_open_data open_data;
 	int fd = -1, fstat_done = 0;
 	struct strbuf path = STRBUF_INIT;
 
+	open_data.mode = (pc_item->ce->ce_mode & 0100) ? 0777 : 0666;
 	strbuf_add(&path, state->base_dir, state->base_dir_len);
 	strbuf_add(&path, pc_item->ce->name, pc_item->ce->ce_namelen);
 
-	fd = open(path.buf, O_WRONLY | O_CREAT | O_EXCL, mode);
-
-	if (fd < 0) {
-		if (errno == EEXIST || errno == EISDIR || errno == ENOENT ||
-		    errno == ENOTDIR) {
+	/*
+	 * The main process already removed any non-directory file that was in
+	 * the way. So if we find one, it's a path collision.
+	 */
+	if (raceproof_create_file(path.buf, pc_open, &open_data)) {
+		if (errno == EEXIST || errno == ENOTDIR || errno == ENOENT) {
 			/*
 			 * Errors which probably represent a path collision.
 			 * Suppress the error message and mark the item to be
@@ -363,6 +391,8 @@ void write_pc_item(struct parallel_checkout_item *pc_item,
 		}
 		goto out;
 	}
+
+	fd = open_data.fd;
 
 	if (write_pc_item_to_fd(pc_item, fd, path.buf, state)) {
 		/* Error was already reported. */
