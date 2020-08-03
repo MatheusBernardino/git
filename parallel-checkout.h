@@ -30,6 +30,14 @@ int enqueue_checkout(struct cache_entry *ce, struct conv_attrs *ca);
 size_t pc_queue_size(void);
 
 /*
+ * Enqueues a symlink to be checked out *sequentially* after the parallel
+ * checkout finishes. This is done to avoid path collisions with leading dirs,
+ * which could make parallel workers write a file to the wrong place.
+ */
+void enqueue_symlink_checkout(struct cache_entry *ce, int *nr_checkouts);
+size_t symlink_queue_size(void);
+
+/*
  * Write all the queued entries, returning 0 on success. If the number of
  * entries is below the specified threshold, the operation is performed
  * sequentially.

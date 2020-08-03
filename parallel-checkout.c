@@ -140,6 +140,44 @@ static void advance_progress_meter(void)
 	}
 }
 
+struct symlink_checkout_item {
+	struct cache_entry *ce;
+	int *nr_checkouts;
+};
+
+static struct symlink_checkout_item *symlink_queue = NULL;
+static size_t symlink_queue_nr = 0, symlink_queue_alloc = 0;
+
+void enqueue_symlink_checkout(struct cache_entry *ce, int *nr_checkouts)
+{
+	assert(S_ISLNK(ce->ce_mode));
+	ALLOC_GROW(symlink_queue, symlink_queue_nr + 1, symlink_queue_alloc);
+	symlink_queue[symlink_queue_nr].ce = ce;
+	symlink_queue[symlink_queue_nr].nr_checkouts = nr_checkouts;
+	symlink_queue_nr++;
+}
+
+size_t symlink_queue_size(void)
+{
+	return symlink_queue_nr;
+}
+
+static int checkout_symlink_queue(struct checkout *state)
+{
+	size_t i;
+	int ret = 0;
+
+	for (i = 0; i < symlink_queue_nr; ++i) {
+		struct symlink_checkout_item *sci = &symlink_queue[i];
+		ret |= checkout_entry(sci->ce, state, NULL, sci->nr_checkouts);
+		advance_progress_meter();
+	}
+
+	FREE_AND_NULL(symlink_queue);
+	symlink_queue_nr = symlink_queue_alloc = 0;
+	return ret;
+}
+
 static int handle_results(struct checkout *state)
 {
 	int ret = 0;
@@ -257,16 +295,6 @@ static int close_and_clear(int *fd)
 	return ret;
 }
 
-static int check_leading_dirs(const char *path, int len, int prefix_len)
-{
-	const char *slash = path + len;
-
-	while (slash > path && *slash != '/')
-		slash--;
-
-	return has_dirs_only_path(path, slash - path, prefix_len);
-}
-
 void write_checkout_item(struct checkout *state, struct checkout_item *ci)
 {
 	unsigned int mode = (ci->ce->ce_mode & 0100) ? 0777 : 0666;
@@ -276,27 +304,15 @@ void write_checkout_item(struct checkout *state, struct checkout_item *ci)
 	strbuf_add(&path, state->base_dir, state->base_dir_len);
 	strbuf_add(&path, ci->ce->name, ci->ce->ce_namelen);
 
-	/*
-	 * At this point, leading dirs should have already been created. But if
-	 * a symlink being checked out has collided with one of the dirs, due to
-	 * file system folding rules, it's possible that the dirs are no longer
-	 * present. So we have to check again, and report any path collisions.
-	 */
-	if (!check_leading_dirs(path.buf, path.len, state->base_dir_len)) {
-		ci->status = CI_RETRY;
-		goto out;
-	}
-
 	fd = open(path.buf, O_WRONLY | O_CREAT | O_EXCL, mode);
 
 	if (fd < 0) {
-		if (errno == EEXIST || errno == EISDIR) {
+		if (errno == EEXIST || errno == EISDIR || errno == ENOENT ||
+		    errno == ENOTDIR) {
 			/*
 			 * Errors which probably represent a path collision.
 			 * Suppress the error message and mark the ci to be
-			 * retried later, sequentially. ENOTDIR and ENOENT are
-			 * also interesting, but check_leading_dirs() should
-			 * have already caught these cases.
+			 * retried later, sequentially.
 			 */
 			ci->status = CI_RETRY;
 		} else {
@@ -523,7 +539,7 @@ static int run_checkout_sequentially(struct checkout *state)
 		if (ci->status != CI_RETRY)
 			advance_progress_meter();
 	}
-	return handle_results(state);
+	return handle_results(state) | checkout_symlink_queue(state);
 }
 
 int run_parallel_checkout(struct checkout *state, int num_workers, int threshold,
@@ -553,7 +569,8 @@ int run_parallel_checkout(struct checkout *state, int num_workers, int threshold
 	workers = setup_workers(state, num_workers);
 	gather_results_from_workers(workers, num_workers);
 	finish_workers(workers, num_workers);
-	ret = handle_results(state);
+	ret |= handle_results(state);
+	ret |= checkout_symlink_queue(state);
 
 done:
 	finish_parallel_checkout();

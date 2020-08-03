@@ -477,6 +477,16 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 		return write_entry(ce, topath, ca, state, 1);
 	}
 
+	/*
+	 * If a regular file x/f is queued for parallel checkout and a symlink
+	 * X is created now, the worker could wrongly create the file at X/f
+	 * due to path collision. Thus, symlinks are only created after
+	 * parallel-eligible entries.
+	 */
+	if (parallel_checkout_status() == PC_ACCEPTING_ENTRIES &&
+	    S_ISLNK(ce->ce_mode))
+		enqueue_symlink_checkout(ce, nr_checkouts);
+
 	strbuf_reset(&path);
 	strbuf_add(&path, state->base_dir, state->base_dir_len);
 	strbuf_add(&path, ce->name, ce_namelen(ce));
