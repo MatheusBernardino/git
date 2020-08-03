@@ -156,6 +156,57 @@ static void advance_progress_meter(void)
 	}
 }
 
+struct symlink_checkout_item {
+	struct cache_entry *ce;
+	int *nr_checkouts;
+};
+
+static struct symlink_checkout_item *symlink_queue = NULL;
+static size_t symlink_queue_nr = 0, symlink_queue_alloc = 0;
+
+int enqueue_symlink_checkout(struct cache_entry *ce, int *nr_checkouts)
+{
+	assert(S_ISLNK(ce->ce_mode));
+
+	/*
+	 * If the parallel-checkout queue is empty, this symlink can be created
+	 * now. Next entries will have their path components checked by
+	 * checkout_entry_ca(), so we will now if the symlink collides with one
+	 * of them.
+	 */
+	if (parallel_checkout.status != PC_ACCEPTING_ENTRIES ||
+	    !parallel_checkout.nr)
+		return -1;
+
+	ALLOC_GROW(symlink_queue, symlink_queue_nr + 1, symlink_queue_alloc);
+	symlink_queue[symlink_queue_nr].ce = ce;
+	symlink_queue[symlink_queue_nr].nr_checkouts = nr_checkouts;
+	symlink_queue_nr++;
+	return 0;
+}
+
+size_t symlink_queue_size(void)
+{
+	return symlink_queue_nr;
+}
+
+static int checkout_symlink_queue(struct checkout *state)
+{
+	size_t i;
+	int ret = 0;
+
+	for (i = 0; i < symlink_queue_nr; i++) {
+		struct symlink_checkout_item *symlink_item = &symlink_queue[i];
+		ret |= checkout_entry(symlink_item->ce, state, NULL,
+				      symlink_item->nr_checkouts);
+		advance_progress_meter();
+	}
+
+	FREE_AND_NULL(symlink_queue);
+	symlink_queue_nr = symlink_queue_alloc = 0;
+	return ret;
+}
+
 static int handle_results(struct checkout *state)
 {
 	int ret = 0;
@@ -303,35 +354,19 @@ void write_pc_item(struct parallel_checkout_item *pc_item,
 	unsigned int mode = (pc_item->ce->ce_mode & 0100) ? 0777 : 0666;
 	int fd = -1, fstat_done = 0;
 	struct strbuf path = STRBUF_INIT;
-	const char *dir_sep;
 
 	strbuf_add(&path, state->base_dir, state->base_dir_len);
 	strbuf_add(&path, pc_item->ce->name, pc_item->ce->ce_namelen);
 
-	dir_sep = find_last_dir_sep(path.buf);
-
-	/*
-	 * The leading dirs should have been already created by now. But, due
-	 * to a path collision, one of the dirs could have been replaced by a
-	 * symlink which was checked out after enqueuing this entry for
-	 * parallel checkout. Thus, we must check the leading dirs again.
-	 */
-	if (dir_sep && !has_dirs_only_path(path.buf, dir_sep - path.buf,
-					   state->base_dir_len)) {
-		pc_item->status = PC_ITEM_COLLIDED;
-		goto out;
-	}
-
 	fd = open(path.buf, O_WRONLY | O_CREAT | O_EXCL, mode);
 
 	if (fd < 0) {
-		if (errno == EEXIST || errno == EISDIR) {
+		if (errno == EEXIST || errno == EISDIR || errno == ENOENT ||
+		    errno == ENOTDIR) {
 			/*
 			 * Errors which probably represent a path collision.
 			 * Suppress the error message and mark the item to be
-			 * retried later, sequentially. ENOTDIR and ENOENT are
-			 * also interesting, but the above has_dirs_only_path()
-			 * call should have already caught these cases.
+			 * retried later, sequentially.
 			 */
 			pc_item->status = PC_ITEM_COLLIDED;
 		} else {
@@ -605,7 +640,7 @@ static void write_items_sequentially(struct checkout *state)
 int run_parallel_checkout(struct checkout *state, int num_workers, int threshold,
 			  struct progress *progress, unsigned int *progress_cnt)
 {
-	int ret;
+	int ret = 0;
 
 	if (parallel_checkout.status != PC_ACCEPTING_ENTRIES)
 		BUG("cannot run parallel checkout: uninitialized or already running");
@@ -625,7 +660,8 @@ int run_parallel_checkout(struct checkout *state, int num_workers, int threshold
 		finish_workers(workers, num_workers);
 	}
 
-	ret = handle_results(state);
+	ret |= handle_results(state);
+	ret |= checkout_symlink_queue(state);
 
 	finish_parallel_checkout();
 	return ret;
