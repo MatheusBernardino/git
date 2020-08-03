@@ -530,8 +530,6 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 	} else if (state->not_new)
 		return 0;
 
-	create_directories(path.buf, path.len, non_dir_len, state);
-
 	if (nr_checkouts)
 		(*nr_checkouts)++;
 
@@ -540,9 +538,24 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 		ca = &ca_buf;
 	}
 
-	if (!enqueue_checkout(ce, ca))
-		return 0;
+	if (!enqueue_checkout(ce, ca)) {
+		/* "clean" path so that workers can create leading dirs */
+		if (non_dir_len >= 0) {
+			char slash_char = path.buf[non_dir_len];
+			path.buf[non_dir_len] = '\0';
 
+			if (!state->force)
+				die("'%s' already exists, and it's not a directory",
+				    path.buf);
+			if (unlink(path.buf))
+				die_errno("cannot unlink '%s'", path.buf);
+		
+			path.buf[non_dir_len] = slash_char;
+		}
+		return 0;
+	}
+
+	create_directories(path.buf, path.len, non_dir_len, state);
 	return write_entry(ce, path.buf, ca, state, 0);
 }
 
