@@ -513,12 +513,24 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 		return 0;
 	}
 
-	if (topath) {
+	if (topath || state->clone) {
 		if (S_ISREG(ce->ce_mode) && !ca) {
 			convert_attrs(state->istate, &ca_buf, ce->name);
 			ca = &ca_buf;
 		}
-		return write_entry(ce, topath, ca, state, 1);
+		if (topath)
+			return write_entry(ce, topath, ca, state, 1);
+		/*
+		 * Since we are cloning, there should be no previous files in
+		 * the working tree. So we can skip calling remove_non_dirs()
+		 * and check_path(). (parallel-checkout.c will take care of path
+		 * collision.)
+		 */
+		if (!enqueue_checkout(ce, ca)) {
+			if (nr_checkouts)
+				(*nr_checkouts)++;
+			return 0;
+		}
 	}
 
 	/*
