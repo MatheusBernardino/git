@@ -12,6 +12,7 @@
 #include "cache-tree.h"
 #include "parse-options.h"
 #include "entry.h"
+#include "parallel-checkout.h"
 
 #define CHECKOUT_ALL 4
 static int nul_term_line;
@@ -160,6 +161,7 @@ int cmd_checkout_index(int argc, const char **argv, const char *prefix)
 	int prefix_length;
 	int force = 0, quiet = 0, not_new = 0;
 	int index_opt = 0;
+	int pc_workers, pc_threshold;
 	struct option builtin_checkout_index_options[] = {
 		OPT_BOOL('a', "all", &all,
 			N_("check out all files in the index")),
@@ -214,6 +216,14 @@ int cmd_checkout_index(int argc, const char **argv, const char *prefix)
 		hold_locked_index(&lock_file, LOCK_DIE_ON_ERROR);
 	}
 
+	if (!to_tempfile)
+		get_parallel_checkout_configs(&pc_workers, &pc_threshold);
+	else
+		pc_workers = 1;
+
+	if (pc_workers > 1)
+		init_parallel_checkout();
+
 	/* Check out named files first */
 	for (i = 0; i < argc; i++) {
 		const char *arg = argv[i];
@@ -255,6 +265,12 @@ int cmd_checkout_index(int argc, const char **argv, const char *prefix)
 
 	if (all)
 		checkout_all(prefix, prefix_length);
+
+	if (pc_workers > 1) {
+		/* Errors were already reported */
+		run_parallel_checkout(&state, pc_workers, pc_threshold,
+				      NULL, NULL);
+	}
 
 	if (is_lock_file_locked(&lock_file) &&
 	    write_locked_index(&the_index, &lock_file, COMMIT_LOCK))
