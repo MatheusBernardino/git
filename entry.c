@@ -19,7 +19,7 @@ static void create_directories(const char *path, int path_len,
 		do {
 			buf[len] = path[len];
 			len++;
-		} while (len < path_len && path[len] != '/');
+		} while (len < path_len && !is_dir_sep(path[len]));
 		if (len >= path_len)
 			break;
 		buf[len] = 0;
@@ -404,7 +404,7 @@ static int check_path(const char *path, int len, struct stat *st, int skiplen)
 {
 	const char *slash = path + len;
 
-	while (path < slash && *slash != '/')
+	while (path < slash && !is_dir_sep(*slash))
 		slash--;
 	if (!has_dirs_only_path(path, slash - path, skiplen)) {
 		errno = ENOENT;
