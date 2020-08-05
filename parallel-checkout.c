@@ -2,6 +2,7 @@
 #include "entry.h"
 #include "parallel-checkout.h"
 #include "pkt-line.h"
+#include "progress.h"
 #include "run-command.h"
 #include "streaming.h"
 #include "thread-utils.h"
@@ -10,6 +11,8 @@
 struct parallel_checkout {
 	struct checkout_item *items;
 	size_t nr, alloc;
+	struct progress *progress;
+	unsigned int *progress_cnt;
 };
 
 static struct parallel_checkout *parallel_checkout = NULL;
@@ -121,6 +124,22 @@ int enqueue_checkout(struct cache_entry *ce, struct conv_attrs *ca)
 	return 0;
 }
 
+size_t pc_queue_size(void)
+{
+	if (!parallel_checkout)
+		return 0;
+	return parallel_checkout->nr;
+}
+
+static void advance_progress_meter(void)
+{
+	if (parallel_checkout && parallel_checkout->progress) {
+		(*parallel_checkout->progress_cnt)++;
+		display_progress(parallel_checkout->progress,
+				 *parallel_checkout->progress_cnt);
+	}
+}
+
 static int handle_results(struct checkout *state)
 {
 	int ret = 0;
@@ -132,6 +151,10 @@ static int handle_results(struct checkout *state)
 		struct checkout_item *ci = &parallel_checkout->items[i];
 		struct stat *st = &ci->st;
 
+		/*
+		 * Note: progress meter was already incremented for CI_SUCCESS
+		 * and CI_FAILED.
+		 */
 		switch(ci->status) {
 		case CI_SUCCESS:
 			update_ce_after_write(state, ci->ce, st);
@@ -145,6 +168,7 @@ static int handle_results(struct checkout *state)
 			 * leading dirs in the entry's path.
 			 */
 			ret |= checkout_entry_ca(ci->ce, &ci->ca, state, NULL, NULL);
+			advance_progress_meter();
 			break;
 		case CI_FAILED:
 			ret = -1;
@@ -434,6 +458,9 @@ static void parse_and_save_result(const char *line, int len)
 	 */
 	if (res->status == CI_SUCCESS)
 		ci->st = res->st;
+
+	if (res->status != CI_RETRY)
+		advance_progress_meter();
 }
 
 static void gather_results_from_workers(struct child_process *workers,
@@ -490,12 +517,17 @@ static void gather_results_from_workers(struct child_process *workers,
 static int run_checkout_sequentially(struct checkout *state)
 {
 	size_t i;
-	for (i = 0; i < parallel_checkout->nr; ++i)
-		write_checkout_item(state, &parallel_checkout->items[i]);
+	for (i = 0; i < parallel_checkout->nr; ++i) {
+		struct checkout_item *ci = &parallel_checkout->items[i];
+		write_checkout_item(state, ci);
+		if (ci->status != CI_RETRY)
+			advance_progress_meter();
+	}
 	return handle_results(state);
 }
 
-int run_parallel_checkout(struct checkout *state, int num_workers, int threshold)
+int run_parallel_checkout(struct checkout *state, int num_workers, int threshold,
+			  struct progress *progress, unsigned int *progress_cnt)
 {
 	int ret = 0;
 	struct child_process *workers;
@@ -508,6 +540,8 @@ int run_parallel_checkout(struct checkout *state, int num_workers, int threshold
 		    num_workers);
 
 	pc_status = PC_RUNNING;
+	parallel_checkout->progress = progress;
+	parallel_checkout->progress_cnt = progress_cnt;
 
 	if (parallel_checkout->nr == 0) {
 		goto done;
