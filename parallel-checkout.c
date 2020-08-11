@@ -473,6 +473,8 @@ static struct pc_worker *setup_workers(struct checkout *state, int num_workers)
 		strvec_push(&cp->args, "checkout--helper");
 		if (state->base_dir_len)
 			strvec_pushf(&cp->args, "--prefix=%s", state->base_dir);
+		if (!state->refresh_cache)
+			strvec_push(&cp->args, "--no-stat");
 		if (start_command(cp))
 			die(_("failed to spawn checkout worker"));
 	}
@@ -530,7 +532,8 @@ static void finish_workers(struct pc_worker *workers, int num_workers)
 } while(0)
 
 static void parse_and_save_result(const char *line, int len,
-				  struct pc_worker *worker)
+				  struct pc_worker *worker,
+				  struct checkout *state)
 {
 	struct pc_item_result *res;
 	struct parallel_checkout_item *pc_item;
@@ -542,14 +545,14 @@ static void parse_and_save_result(const char *line, int len,
 
 	res = (struct pc_item_result *)line;
 
-	/*
-	 * Worker should send either the full result struct on success, or
-	 * just the base (i.e. no stat data), otherwise.
-	 */
-	if (res->status == PC_ITEM_WRITTEN) {
+	if (state->refresh_cache && res->status == PC_ITEM_WRITTEN) {
 		ASSERT_PC_ITEM_RESULT_SIZE(len, (int)sizeof(struct pc_item_result));
 		st = &res->st;
 	} else {
+		/*
+		 * If !state->refresh_cache or the item was not checked out
+		 * successfully, the worker should not send stat() data.
+		 */
 		ASSERT_PC_ITEM_RESULT_SIZE(len, (int)PC_ITEM_RESULT_BASE_SIZE);
 	}
 
@@ -568,9 +571,8 @@ static void parse_and_save_result(const char *line, int len,
 		advance_progress_meter();
 }
 
-
 static void gather_results_from_workers(struct pc_worker *workers,
-					int num_workers)
+					int num_workers, struct checkout *state)
 {
 	int i, active_workers = num_workers;
 	struct pollfd *pfds;
@@ -605,7 +607,8 @@ static void gather_results_from_workers(struct pc_worker *workers,
 					pfd->fd = -1;
 					active_workers--;
 				} else {
-					parse_and_save_result(line, len, worker);
+					parse_and_save_result(line, len, worker,
+							      state);
 				}
 			} else if (pfd->revents & POLLHUP) {
 				pfd->fd = -1;
@@ -652,7 +655,7 @@ int run_parallel_checkout(struct checkout *state, int num_workers, int threshold
 		write_items_sequentially(state);
 	} else {
 		struct pc_worker *workers = setup_workers(state, num_workers);
-		gather_results_from_workers(workers, num_workers);
+		gather_results_from_workers(workers, num_workers, state);
 		finish_workers(workers, num_workers);
 	}
 
