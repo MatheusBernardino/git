@@ -501,6 +501,8 @@ static struct pc_worker *setup_workers(struct checkout *state, int num_workers)
 		strvec_push(&cp->args, "checkout--worker");
 		if (state->base_dir_len)
 			strvec_pushf(&cp->args, "--prefix=%s", state->base_dir);
+		if (!state->refresh_cache)
+			strvec_push(&cp->args, "--no-stat");
 		if (start_command(cp))
 			die("failed to spawn checkout worker");
 	}
@@ -565,7 +567,8 @@ static inline void assert_pc_item_result_size(int got, int exp)
 }
 
 static void parse_and_save_result(const char *buffer, int len,
-				  struct pc_worker *worker)
+				  struct pc_worker *worker,
+				  struct checkout *state)
 {
 	struct pc_item_result *res;
 	struct parallel_checkout_item *pc_item;
@@ -577,11 +580,7 @@ static void parse_and_save_result(const char *buffer, int len,
 
 	res = (struct pc_item_result *)buffer;
 
-	/*
-	 * Worker should send either the full result struct on success, or
-	 * just the base (i.e. no stat data), otherwise.
-	 */
-	if (res->status == PC_ITEM_WRITTEN) {
+	if (state->refresh_cache && res->status == PC_ITEM_WRITTEN) {
 		assert_pc_item_result_size(len, (int)sizeof(struct pc_item_result));
 		st = &res->st;
 	} else {
@@ -607,7 +606,7 @@ static void parse_and_save_result(const char *buffer, int len,
 }
 
 static void gather_results_from_workers(struct pc_worker *workers,
-					int num_workers)
+					int num_workers, struct checkout *state)
 {
 	int i, active_workers = num_workers;
 	struct pollfd *pfds;
@@ -646,7 +645,8 @@ static void gather_results_from_workers(struct pc_worker *workers,
 					active_workers--;
 				} else {
 					parse_and_save_result(packet_buffer,
-							      len, worker);
+							      len, worker,
+							      state);
 				}
 			} else if (pfd->revents & POLLHUP) {
 				pfd->fd = -1;
@@ -693,7 +693,7 @@ int run_parallel_checkout(struct checkout *state, int num_workers, int threshold
 		write_items_sequentially(state);
 	} else {
 		struct pc_worker *workers = setup_workers(state, num_workers);
-		gather_results_from_workers(workers, num_workers);
+		gather_results_from_workers(workers, num_workers, state);
 		finish_workers(workers, num_workers);
 	}
 

@@ -51,7 +51,8 @@ static void packet_to_pc_item(const char *buffer, int len,
 	pc_item->ca.working_tree_encoding = encoding;
 }
 
-static void report_result(struct parallel_checkout_item *pc_item)
+static void report_result(struct parallel_checkout_item *pc_item,
+			  struct checkout *state)
 {
 	struct pc_item_result res;
 	size_t size;
@@ -59,7 +60,7 @@ static void report_result(struct parallel_checkout_item *pc_item)
 	res.id = pc_item->id;
 	res.status = pc_item->status;
 
-	if (pc_item->status == PC_ITEM_WRITTEN) {
+	if (state->refresh_cache && pc_item->status == PC_ITEM_WRITTEN) {
 		res.st = pc_item->st;
 		size = sizeof(res);
 	} else {
@@ -97,7 +98,7 @@ static void worker_loop(struct checkout *state)
 	for (i = 0; i < nr; i++) {
 		struct parallel_checkout_item *pc_item = &items[i];
 		write_pc_item(pc_item, state);
-		report_result(pc_item);
+		report_result(pc_item, state);
 		release_pc_item_data(pc_item);
 	}
 
@@ -113,10 +114,13 @@ static const char * const checkout_worker_usage[] = {
 
 int cmd_checkout__worker(int argc, const char **argv, const char *prefix)
 {
+	int do_stat = 1;
 	struct checkout state = CHECKOUT_INIT;
 	struct option checkout_worker_options[] = {
 		OPT_STRING(0, "prefix", &state.base_dir, N_("string"),
 			N_("when creating files, prepend <string>")),
+		OPT_BOOL(0, "stat", &do_stat,
+			 N_("output stat() info for each written entry (default)")),
 		OPT_END()
 	};
 
@@ -133,12 +137,15 @@ int cmd_checkout__worker(int argc, const char **argv, const char *prefix)
 	if (state.base_dir)
 		state.base_dir_len = strlen(state.base_dir);
 
-	/*
-	 * Setting this on a worker won't actually update the index. We just
-	 * need to tell the checkout machinery to lstat() the written entries,
-	 * so that we can send this data back to the main process.
-	 */
-	state.refresh_cache = 1;
+	if (do_stat) {
+		/*
+		 * Setting this on a worker won't actually update the index. We
+		 * just need to tell the checkout machinery to lstat() the
+		 * written entries, so that we can send this data back to the
+		 * main process.
+		 */
+		state.refresh_cache = 1;
+	}
 
 	worker_loop(&state);
 	return 0;
