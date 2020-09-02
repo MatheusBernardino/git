@@ -14,10 +14,7 @@ check_config () {
 		expect_code=0
 	fi &&
 	op=$1 key=$2 && shift && shift &&
-	if test $# != 0
-	then
-		printf "%s\n" "$@"
-	fi >expect &&
+	printf "%s\n" "$@" >expect &&
 	test_expect_code $expect_code test-tool config "$op" "$key" >actual &&
 	test_cmp expect actual
 }
@@ -130,7 +127,8 @@ test_expect_success 'check line error when NULL string is queried' '
 '
 
 test_expect_success 'find integer if value is non parse-able' '
-	check_config expect_code 128 get_int lamb.head
+	test_expect_code 128 test-tool config get_int lamb.head 2>result &&
+	test_i18ngrep "fatal: bad numeric config value '\'none\'' for '\'lamb.head\''" result
 '
 
 test_expect_success 'find bool value for the entered key' '
