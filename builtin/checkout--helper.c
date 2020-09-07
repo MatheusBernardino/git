@@ -79,30 +79,34 @@ static void release_pc_item_data(struct parallel_checkout_item *pc_item)
 
 static void worker_loop(struct checkout *state)
 {
-	struct parallel_checkout_item *items = NULL;
-	size_t i, nr = 0, alloc = 0;
-
 	while (1) {
-		int len;
-		char *line = packet_read_line(0, &len);
+		struct parallel_checkout_item *items = NULL;
+		size_t i, nr = 0, alloc = 0;
 
-		if (!line)
+		while (1) {
+			int len;
+			char *line = packet_read_line(0, &len);
+
+			if (!line)
+				break;
+
+			ALLOC_GROW(items, nr + 1, alloc);
+			packet_to_pc_item(line, len, &items[nr++]);
+		}
+
+		if (!nr)
 			break;
 
-		ALLOC_GROW(items, nr + 1, alloc);
-		packet_to_pc_item(line, len, &items[nr++]);
+		for (i = 0; i < nr; ++i) {
+			struct parallel_checkout_item *pc_item = &items[i];
+			write_pc_item(pc_item, state);
+			report_result(pc_item, state);
+			release_pc_item_data(pc_item);
+		}
+
+		packet_flush(1);
+		free(items);
 	}
-
-	for (i = 0; i < nr; ++i) {
-		struct parallel_checkout_item *pc_item = &items[i];
-		write_pc_item(pc_item, state);
-		report_result(pc_item, state);
-		release_pc_item_data(pc_item);
-	}
-
-	packet_flush(1);
-
-	free(items);
 }
 
 static const char * const checkout_helper_usage[] = {
