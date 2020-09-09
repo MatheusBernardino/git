@@ -21,12 +21,12 @@ test_checkout_workers () {
 	shift &&
 
 	rm -f trace &&
-	GIT_TRACE2="$(pwd)/trace" "$@" &&
+	GIT_TRACE2="$(pwd)/trace" "$@" 2>&8 &&
 
 	workers=$(grep "child_start\[..*\] git checkout--worker" trace | wc -l) &&
 	test $workers -eq $expected_workers &&
 	rm -f trace
-}
+} 8>&2 2>&4
 
 # Verify that both the working tree and the index were created correctly
 verify_checkout () {
