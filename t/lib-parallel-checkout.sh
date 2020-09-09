@@ -18,7 +18,7 @@ git_pc()
 		-c checkout.workers=$workers \
 		-c checkout.thresholdForParallelism=$threshold \
 		-c advice.detachedHead=0 \
-		"$@" &&
+		"$@" 2>&8 &&
 
 	# Check that the expected number of workers has been used. Note that it
 	# can be different from the requested number in two cases: when the
@@ -28,7 +28,7 @@ git_pc()
 	local workers_in_trace=$(grep "child_start\[..*\] git checkout--helper" trace | wc -l) &&
 	test $workers_in_trace -eq $expected_workers &&
 	rm -f trace
-}
+} 8>&2 2>&4
 
 # Verify that both the working tree and the index were created correctly
 verify_checkout()
