@@ -4,6 +4,12 @@ test_description='parallel-checkout collisions'
 
 . ./test-lib.sh
 
+if ! test -z "$GIT_TEST_CHECKOUT_WORKERS"
+then
+	skip_all="skipping test, GIT_TEST_CHECKOUT_WORKERS is set"
+	test_done
+fi
+
 # When there are pathname collisions during a clone, Git should report a warning
 # listing all of the colliding entries. The sequential code detects a collision
 # by calling lstat() before trying to open(O_CREAT) the file. Then, to find the

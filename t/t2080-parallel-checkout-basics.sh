@@ -16,6 +16,12 @@ then
 	test_done
 fi
 
+if ! test -z "$GIT_TEST_CHECKOUT_WORKERS"
+then
+	skip_all="skipping test, GIT_TEST_CHECKOUT_WORKERS is set"
+	test_done
+fi
+
 R_BASE=$GIT_BUILD_DIR
 
 test_expect_success 'sequential clone' '
