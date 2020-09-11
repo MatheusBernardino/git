@@ -1,5 +1,11 @@
 # Helpers for t208* tests
 
+if ! test -z "$GIT_TEST_CHECKOUT_WORKERS"
+then
+	skip_all="skipping test, GIT_TEST_CHECKOUT_WORKERS is set"
+	test_done
+fi
+
 # Runs `git -c checkout.workers=$1 -c checkout.thesholdForParallelism=$2 ${@:4}`
 # and checks that the number of workers spawned is equal to $3.
 #
