@@ -3,6 +3,7 @@
 test_description='parallel-checkout collisions'
 
 . ./test-lib.sh
+. "$TEST_DIRECTORY/lib-parallel-checkout.sh"
 
 # When there are pathname collisions during a clone, Git should report a warning
 # listing all of the colliding entries. The sequential code detects a collision
