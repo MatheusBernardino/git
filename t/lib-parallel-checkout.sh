@@ -1,5 +1,8 @@
 # Helpers for t208* tests
 
+# Parallel checkout tests need full control of the number of workers
+unset GIT_TEST_CHECKOUT_WORKERS
+
 parallel_checkout_config () {
 	test_config_global checkout.workers $1 &&
 	test_config_global checkout.thresholdForParallelism $2
