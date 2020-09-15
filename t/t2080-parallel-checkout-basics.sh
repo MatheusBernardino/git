@@ -22,36 +22,6 @@ then
 	test_done
 fi
 
-R_BASE=$GIT_BUILD_DIR
-
-test_expect_success 'sequential clone' '
-	git_pc 1 0 0 clone --quiet -- $R_BASE r_sequential &&
-	verify_checkout r_sequential
-'
-
-test_expect_success 'parallel clone' '
-	git_pc 2 0 2 clone --quiet -- $R_BASE r_parallel &&
-	verify_checkout r_parallel
-'
-
-test_expect_success 'fallback to sequential clone (threshold)' '
-	git -C $R_BASE ls-files >files &&
-	nr_files=$(wc -l <files) &&
-	threshold=$(($nr_files + 1)) &&
-
-	git_pc 2 $threshold 0 clone --quiet -- $R_BASE r_sequential_fallback &&
-	verify_checkout r_sequential_fallback
-'
-
-# Just to be paranoid, actually compare the contents of the worktrees directly.
-test_expect_success 'compare working trees from clones' '
-	rm -rf r_sequential/.git &&
-	rm -rf r_parallel/.git &&
-	rm -rf r_sequential_fallback/.git &&
-	diff -qr r_sequential r_parallel &&
-	diff -qr r_sequential r_sequential_fallback
-'
-
 # Test parallel-checkout with different operations (creation, deletion,
 # modification) and entry types. Switching from branch B1 to B2 represents:
 #
@@ -88,7 +58,8 @@ test_expect_success SYMLINKS 'setup repo for checkout with various operations' '
 		git commit -m B2 &&
 
 		git checkout --recurse-submodules B1
-	)
+	) &&
+	git -C various status 2>&1 >status-output
 '
 
 test_expect_success SYMLINKS 'sequential checkout' '
@@ -110,6 +81,7 @@ test_expect_success SYMLINKS 'fallback to sequential checkout (threshold)' '
 '
 
 test_expect_success SYMLINKS 'compare working trees from checkouts' '
+	false &&
 	rm -rf various_sequential/.git &&
 	rm -rf various_parallel/.git &&
 	rm -rf various_sequential_fallback/.git &&
