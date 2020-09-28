@@ -1772,14 +1772,26 @@ void *unpack_entry(struct repository *r, struct packed_git *p, off_t obj_offset,
 	while (delta_stack_nr) {
 		void *delta_data;
 		void *base = data;
-		void *external_base = NULL;
+		void *transient_base = NULL;
 		unsigned long delta_size, base_size = size;
 		int i;
 
 		data = NULL;
 
-		if (base)
+		if (base) {
 			add_delta_base_cache(p, obj_offset, base, base_size, type);
+			/*
+			 * When running multithreaded, duplicate `base` to
+			 * avoid working on the same buffer added to the cache
+			 * above. So if another thread happens to free() the
+			 * cache copy when we later relase the obj_read_mutex,
+			 * it won't mess with our `base`.
+			 */
+			if (obj_read_use_lock) {
+				base = memcpy(xmalloc(base_size), base, base_size);
+				transient_base = base;
+			}
+		}
 
 		if (!base) {
 			/*
@@ -1799,7 +1811,7 @@ void *unpack_entry(struct repository *r, struct packed_git *p, off_t obj_offset,
 				      p->pack_name);
 				mark_bad_packed_object(p, base_oid.hash);
 				base = read_object(r, &base_oid, &type, &base_size);
-				external_base = base;
+				transient_base = base;
 			}
 		}
 
@@ -1818,7 +1830,7 @@ void *unpack_entry(struct repository *r, struct packed_git *p, off_t obj_offset,
 			      "at offset %"PRIuMAX" from %s",
 			      (uintmax_t)curpos, p->pack_name);
 			data = NULL;
-			free(external_base);
+			free(transient_base);
 			continue;
 		}
 
@@ -1838,7 +1850,7 @@ void *unpack_entry(struct repository *r, struct packed_git *p, off_t obj_offset,
 			error("failed to apply delta");
 
 		free(delta_data);
-		free(external_base);
+		free(transient_base);
 	}
 
 	if (final_type)
