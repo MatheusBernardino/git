@@ -1474,7 +1474,7 @@ void clear_delta_base_cache(void)
 static void add_delta_base_cache(struct packed_git *p, off_t base_offset,
 	void *base, unsigned long base_size, enum object_type type)
 {
-	struct delta_base_cache_entry *ent = xmalloc(sizeof(*ent));
+	struct delta_base_cache_entry *ent;
 	struct list_head *lru, *tmp;
 
 	/*
@@ -1482,8 +1482,10 @@ static void add_delta_base_cache(struct packed_git *p, off_t base_offset,
 	 * is unpacking the same object, in unpack_entry() (since its phases I
 	 * and III might run concurrently across multiple threads).
 	 */
-	if (in_delta_base_cache(p, base_offset))
+	if (in_delta_base_cache(p, base_offset)) {
+		free(base);
 		return;
+	}
 
 	delta_base_cached += base_size;
 
@@ -1495,6 +1497,7 @@ static void add_delta_base_cache(struct packed_git *p, off_t base_offset,
 		release_delta_base_cache(f);
 	}
 
+	ent = xmalloc(sizeof(*ent));
 	ent->key.p = p;
 	ent->key.base_offset = base_offset;
 	ent->type = type;
