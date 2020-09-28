@@ -1471,10 +1471,10 @@ void clear_delta_base_cache(void)
 	}
 }
 
-static void add_delta_base_cache(struct packed_git *p, off_t base_offset,
+static int add_delta_base_cache(struct packed_git *p, off_t base_offset,
 	void *base, unsigned long base_size, enum object_type type)
 {
-	struct delta_base_cache_entry *ent = xmalloc(sizeof(*ent));
+	struct delta_base_cache_entry *ent;
 	struct list_head *lru, *tmp;
 
 	/*
@@ -1483,7 +1483,7 @@ static void add_delta_base_cache(struct packed_git *p, off_t base_offset,
 	 * and III might run concurrently across multiple threads).
 	 */
 	if (in_delta_base_cache(p, base_offset))
-		return;
+		return 0;
 
 	delta_base_cached += base_size;
 
@@ -1495,6 +1495,7 @@ static void add_delta_base_cache(struct packed_git *p, off_t base_offset,
 		release_delta_base_cache(f);
 	}
 
+	ent = xmalloc(sizeof(*ent));
 	ent->key.p = p;
 	ent->key.base_offset = base_offset;
 	ent->type = type;
@@ -1506,6 +1507,7 @@ static void add_delta_base_cache(struct packed_git *p, off_t base_offset,
 		hashmap_init(&delta_base_cache, delta_base_cache_hash_cmp, NULL, 0);
 	hashmap_entry_init(&ent->ent, pack_entry_hash(p, base_offset));
 	hashmap_add(&delta_base_cache, &ent->ent);
+	return 1;
 }
 
 int packed_object_info(struct repository *r, struct packed_git *p,
@@ -1841,8 +1843,10 @@ void *unpack_entry(struct repository *r, struct packed_git *p, off_t obj_offset,
 		 * thread could free() it (e.g. to make space for another entry)
 		 * before we are done using it.
 		 */
-		if (!external_base)
-			add_delta_base_cache(p, base_obj_offset, base, base_size, type);
+		if (!external_base && !add_delta_base_cache(p, base_obj_offset,
+						base, base_size, type)) {
+			free(base);
+		}
 
 		free(delta_data);
 		free(external_base);
