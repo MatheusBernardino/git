@@ -186,6 +186,11 @@ char *strbuf_realpath(struct strbuf *resolved, const char *path,
 			 * need to be resolved
 			 */
 			strbuf_swap(&symlink, &remaining);
+		} else if (!S_ISDIR(st.st_mode) && remaining.len) {
+			if (die_on_error)
+				die("Not a directory: '%s'", resolved->buf);
+			else
+				goto error_out;
 		}
 	}
 
