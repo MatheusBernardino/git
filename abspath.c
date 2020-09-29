@@ -66,20 +66,8 @@ static void get_root_part(struct strbuf *resolved, struct strbuf *remaining)
 #define MAXSYMLINKS 32
 #endif
 
-/*
- * Return the real path (i.e., absolute path, with symlinks resolved
- * and extra slashes removed) equivalent to the specified path.  (If
- * you want an absolute path but don't mind links, use
- * absolute_path().)  Places the resolved realpath in the provided strbuf.
- *
- * The directory part of path (i.e., everything up to the last
- * dir_sep) must denote a valid, existing directory, but the last
- * component need not exist.  If die_on_error is set, then die with an
- * informative error message if there is a problem.  Otherwise, return
- * NULL on errors (without generating any output).
- */
-char *strbuf_realpath(struct strbuf *resolved, const char *path,
-		      int die_on_error)
+static char *realpath_internal(struct strbuf *resolved, const char *path,
+			       int die_on_error, int longest_valid_path)
 {
 	struct strbuf remaining = STRBUF_INIT;
 	struct strbuf next = STRBUF_INIT;
@@ -128,6 +116,10 @@ char *strbuf_realpath(struct strbuf *resolved, const char *path,
 		strbuf_addbuf(resolved, &next);
 
 		if (lstat(resolved->buf, &st)) {
+			if (errno == ENOENT && longest_valid_path) {
+				strip_last_component(resolved);
+				break;
+			}
 			/* error out unless this was the last component */
 			if (errno != ENOENT || remaining.len) {
 				if (die_on_error)
@@ -187,6 +179,10 @@ char *strbuf_realpath(struct strbuf *resolved, const char *path,
 			 */
 			strbuf_swap(&symlink, &remaining);
 		} else if (!S_ISDIR(st.st_mode) && remaining.len) {
+			if (longest_valid_path) {
+				strip_last_component(resolved);
+				break;
+			}
 			if (die_on_error)
 				die("Not a directory: '%s'", resolved->buf);
 			else
@@ -205,6 +201,39 @@ error_out:
 		strbuf_reset(resolved);
 
 	return retval;
+}
+
+/*
+ * Return the real path (i.e., absolute path, with symlinks resolved
+ * and extra slashes removed) equivalent to the specified path.  (If
+ * you want an absolute path but don't mind links, use
+ * absolute_path().)  Places the resolved realpath in the provided strbuf.
+ *
+ * The directory part of path (i.e., everything up to the last
+ * dir_sep) must denote a valid, existing directory, but the last
+ * component need not exist.  If die_on_error is set, then die with an
+ * informative error message if there is a problem.  Otherwise, return
+ * NULL on errors (without generating any output).
+ */
+char *strbuf_realpath(struct strbuf *resolved, const char *path,
+		      int die_on_error)
+{
+	return realpath_internal(resolved, path, die_on_error, 0);
+}
+
+/*
+ * Like strbuf_realpath() but does not require the directory part of `path` to
+ * exist. Instead, resolves and returns the longest prefix of `path` which
+ * represents a valid exiting path (in canonical form).
+ *
+ * Note: not all path components need to exist, but when they do, they must be
+ * valid. So broken symlinks and regular files used as directories, for example,
+ * are considered errors.
+ */
+char *longest_realpath(struct strbuf *resolved, const char *path,
+		      int die_on_error)
+{
+	return realpath_internal(resolved, path, die_on_error, 1);
 }
 
 char *real_pathdup(const char *path, int die_on_error)
