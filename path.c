@@ -1277,6 +1277,29 @@ int ends_with_path_components(const char *path, const char *components)
 	return stripped_path_suffix_offset(path, components) != -1;
 }
 
+int is_path_prefix(const char *path, const char *prefix_candidate)
+{
+	const char *trailing;
+	int prefix_len;
+
+	if (!*path || !*prefix_candidate)
+		BUG("is_path_prefix(): the empty string is not a valid path.");
+
+	if (!skip_prefix(path, prefix_candidate, &trailing))
+		return 0;
+
+	prefix_len = trailing - path;
+
+	/*
+	 * OK, the candidate is a prefix, but is it a *path* prefix?
+	 *
+	 * - '/a' is only a path prefix of '/a/...' and '/a', not '/ab'
+	 * - '/' (or 'C:/') is a path prefix of '/a'
+	 */
+	return is_dir_sep(*trailing) || !*trailing ||
+		is_dir_sep(prefix_candidate[prefix_len - 1]);
+}
+
 /*
  * If path ends with suffix (complete path components), returns the
  * part before suffix (sans trailing directory separators).

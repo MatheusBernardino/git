@@ -28,9 +28,80 @@ enum pc_status parallel_checkout_status(void)
 	return parallel_checkout.status;
 }
 
-#define DEFAULT_THRESHOLD_FOR_PARALLELISM 100
+#if defined(__linux__)
+#include <mntent.h>
 
-void get_parallel_checkout_configs(int *num_workers, int *threshold)
+static int checkout_base_path(struct checkout *state, struct strbuf *path)
+{
+	struct strbuf dirname = STRBUF_INIT;
+	int ret, sep = state->base_dir_len - 1;
+
+	while (sep >= 0 && !is_dir_sep(state->base_dir[sep]))
+		sep--;
+
+	if (sep < 0)
+		return strbuf_getcwd(path);
+
+	strbuf_add(&dirname, state->base_dir, sep + 1);
+	ret = !longest_realpath(path, dirname.buf, 0);
+	strbuf_release(&dirname);
+
+	return ret;
+}
+
+#ifndef _PATH_MOUNTED
+#define _PATH_MOUNTED "/etc/mtab"
+#endif
+
+static int is_nfs_checkout(struct checkout *state)
+{
+	int ret = 0, longest_mnt_prefix = 0;
+	struct strbuf checkout_path = STRBUF_INIT, mnt_type = STRBUF_INIT;
+	struct mntent *mntent;
+	FILE *mntfile = setmntent(_PATH_MOUNTED, "r");
+
+	if (!mntfile)
+		return 0;
+
+	if (checkout_base_path(state, &checkout_path))
+		goto out;
+
+	while ((mntent = getmntent(mntfile))) {
+		int mnt_dir_len = strlen(mntent->mnt_dir);
+
+		if (mnt_dir_len > longest_mnt_prefix &&
+		    is_path_prefix(checkout_path.buf, mntent->mnt_dir)) {
+
+			longest_mnt_prefix = mnt_dir_len;
+			strbuf_reset(&mnt_type);
+			strbuf_addstr(&mnt_type, mntent->mnt_type);
+
+			if (longest_mnt_prefix == checkout_path.len)
+				break;
+		}
+	}
+
+	if (starts_with(mnt_type.buf, "nfs"))
+		ret = 1;
+
+out:
+	strbuf_release(&checkout_path);
+	strbuf_release(&mnt_type);
+	endmntent(mntfile);
+	return ret;
+}
+#else
+static int is_nfs_checkout(struct checkout *state)
+{
+	return 0; /* unknown */
+}
+#endif
+
+#define DEFAULT_THRESHOLD_FOR_PARALLELISM 100
+#define DEFAULT_WORKERS_ON_NFS 16
+
+void get_parallel_checkout_configs(struct checkout *state, int *num_workers,
+				   int *threshold)
 {
 	char *env_workers = getenv("GIT_TEST_CHECKOUT_WORKERS");
 
@@ -47,7 +118,7 @@ void get_parallel_checkout_configs(int *num_workers, int *threshold)
 	}
 
 	if (git_config_get_int("checkout.workers", num_workers))
-		*num_workers = 1;
+		*num_workers = is_nfs_checkout(state) ? DEFAULT_WORKERS_ON_NFS : 1;
 	else if (*num_workers < 1)
 		*num_workers = online_cpus();
 

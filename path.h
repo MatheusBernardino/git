@@ -197,4 +197,7 @@ const char *git_path_shallow(struct repository *r);
 
 int ends_with_path_components(const char *path, const char *components);
 
+/* Note: both `path` and `prefix_candidate` must be in canonical form. */
+int is_path_prefix(const char *path, const char *prefix_candidate);
+
 #endif /* PATH_H */
