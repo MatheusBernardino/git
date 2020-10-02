@@ -28,9 +28,196 @@ enum pc_status parallel_checkout_status(void)
 	return parallel_checkout.status;
 }
 
-#define DEFAULT_THRESHOLD_FOR_PARALLELISM 100
+#define CHECKOUT_FS_UNKNOWN 0
+#define CHECKOUT_FS_EFS 1
+#define CHECKOUT_FS_NFS 2
 
-void get_parallel_checkout_configs(int *num_workers, int *threshold)
+#if defined(__linux__)
+#include <mntent.h>
+
+static void escape_mnt_dir(const char *mnt_dir, struct strbuf *escaped)
+{
+	strbuf_reset(escaped);
+
+	for ( ; *mnt_dir; ++mnt_dir) {
+		if (*mnt_dir == ' ')
+			strbuf_addstr(escaped, "\\040");
+		else if (*mnt_dir == '\t')
+			strbuf_addstr(escaped, "\\011");
+		else if (*mnt_dir == '\n')
+			strbuf_addstr(escaped, "\\012");
+		else if (*mnt_dir == '\\')
+			strbuf_addstr(escaped, "\\0134");
+		else
+			strbuf_addch(escaped, *mnt_dir);
+	}
+}
+
+static int is_efs(const char *mnt_dir, const char *mnt_type)
+{
+	struct strbuf line_buf = STRBUF_INIT;
+	struct strbuf mnt_dir_escaped = STRBUF_INIT;
+	struct strbuf mnt_str = STRBUF_INIT;
+	int mnt_entry_found = 0, ret = 0;
+	FILE *fp;
+
+	if (!starts_with(mnt_type, "nfs4"))
+		return 0;
+
+	fp = fopen("/proc/self/mountstats", "r");
+	if (!fp)
+		return 0;
+
+	escape_mnt_dir(mnt_dir, &mnt_dir_escaped);
+	strbuf_addstr(&mnt_str, " mounted on ");
+	strbuf_addbuf(&mnt_str, &mnt_dir_escaped);
+
+	while (strbuf_getline(&line_buf, fp) != EOF) {
+		const char *line = line_buf.buf;
+
+		if (mnt_entry_found) {
+			if (skip_prefix(line, "\timpl_id:\tname=", &line)) {
+				if (starts_with(line, "'Amazon EFS'"))
+					ret = 1;
+				break;
+			} else if (starts_with(line, "device ")) {
+				break;
+			}
+		} else if (skip_prefix(line, "device ", &line)) {
+			while (*line != ' ')
+				line++;
+			if (starts_with(line, mnt_str.buf))
+				mnt_entry_found = 1;
+		}
+	}
+
+	strbuf_release(&line_buf);
+	strbuf_release(&mnt_str);
+	strbuf_release(&mnt_dir_escaped);
+	return ret;
+}
+
+static int checkout_base_path(struct checkout *state, struct strbuf *path)
+{
+	struct strbuf dirname = STRBUF_INIT;
+	int ret, sep = state->base_dir_len - 1;
+
+	while (sep >= 0 && !is_dir_sep(state->base_dir[sep]))
+		sep--;
+
+	if (sep < 0)
+		return strbuf_getcwd(path);
+
+	strbuf_add(&dirname, state->base_dir, sep + 1);
+	ret = !longest_realpath(path, dirname.buf, 0);
+	strbuf_release(&dirname);
+
+	return ret;
+}
+
+#define PREFIX_NOMATCH 0
+#define PREFIX_MATCH 1
+#define EXACT_MATCH 2
+
+/*
+ * Checks if `prefix_candidate` is a prefix of `path. If so, saves the prefix
+ * length in path components to `components`.
+ */
+static int prefix_match(char *prefix_candidate, char *path, int *components)
+{
+	*components = 0;
+
+	while (*prefix_candidate == *path && *path) {
+		if (is_dir_sep(*path))
+			(*components)++;
+		prefix_candidate++;
+		path++;
+	}
+
+	if (*prefix_candidate) {
+		*components = 0;
+		return PREFIX_NOMATCH;
+	}
+
+	if (!*path) {
+		/*
+		 * The last path component doesn't have a trailing slash.
+		 * So the component was not counted in the loop above.
+		 */
+		(*components)++;
+		return EXACT_MATCH;
+	}
+
+	/* Case: path is "/a/b/c" and prefix is "/a/b" */
+	if (is_dir_sep(*path))
+		(*components)++;
+
+	return PREFIX_MATCH;
+}
+
+#ifndef _PATH_MOUNTED
+#define _PATH_MOUNTED "/etc/mtab"
+#endif
+
+static int checkout_fs_type(struct checkout *state)
+{
+	int ret = CHECKOUT_FS_UNKNOWN, longest_match_len = 0;
+	struct strbuf checkout_path = STRBUF_INIT;
+	char *mnt_type = NULL, *mnt_dir = NULL;
+	struct mntent *ent;
+	FILE *mntfile = setmntent(_PATH_MOUNTED, "r");
+
+	if (!mntfile)
+		return CHECKOUT_FS_UNKNOWN;
+
+	if (checkout_base_path(state, &checkout_path))
+		goto out;
+
+	while ((ent = getmntent(mntfile))) {
+		int match, len;
+
+		match = prefix_match(ent->mnt_dir, checkout_path.buf, &len);
+
+		if (match == EXACT_MATCH ||
+		    (match == PREFIX_MATCH && len > longest_match_len)) {
+			free(mnt_type);
+			mnt_type = xstrdup(ent->mnt_type);
+			free(mnt_dir);
+			mnt_dir = xstrdup(ent->mnt_dir);
+
+			longest_match_len = len;
+			if (match == EXACT_MATCH)
+				break;
+		}
+	}
+
+	if (longest_match_len) {
+		if (is_efs(mnt_dir, mnt_type))
+			ret = CHECKOUT_FS_EFS;
+		else if (starts_with(mnt_type, "nfs"))
+			ret = CHECKOUT_FS_NFS;
+	}
+
+out:
+	strbuf_release(&checkout_path);
+	endmntent(mntfile);
+	free(mnt_type);
+	free(mnt_dir);
+	return ret;
+}
+#else
+static int checkout_fs_type(struct checkout *state)
+{
+	return CHECKOUT_FS_UNKNOWN;
+}
+#endif
+
+#define DEFAULT_THRESHOLD_FOR_PARALLELISM 100
+#define DEFAULT_WORKERS_ON_NFS 16
+#define DEFAULT_WORKERS_ON_EFS 64
+
+void get_parallel_checkout_configs(struct checkout *state, int *num_workers,
+				   int *threshold)
 {
 	char *env_workers = getenv("GIT_TEST_CHECKOUT_WORKERS");
 
@@ -46,10 +233,18 @@ void get_parallel_checkout_configs(int *num_workers, int *threshold)
 		return;
 	}
 
-	if (git_config_get_int("checkout.workers", num_workers))
-		*num_workers = 1;
-	else if (*num_workers < 1)
+	if (git_config_get_int("checkout.workers", num_workers)) {
+		int fstype = checkout_fs_type(state);
+
+		if (fstype == CHECKOUT_FS_NFS)
+			*num_workers = DEFAULT_WORKERS_ON_NFS;
+		else if (fstype == CHECKOUT_FS_EFS)
+			*num_workers = DEFAULT_WORKERS_ON_EFS;
+		else
+			*num_workers = 1;
+	} else if (*num_workers < 1) {
 		*num_workers = online_cpus();
+	}
 
 	if (git_config_get_int("checkout.thresholdForParallelism", threshold))
 		*threshold = DEFAULT_THRESHOLD_FOR_PARALLELISM;

@@ -217,7 +217,7 @@ int cmd_checkout_index(int argc, const char **argv, const char *prefix)
 	}
 
 	if (!to_tempfile)
-		get_parallel_checkout_configs(&pc_workers, &pc_threshold);
+		get_parallel_checkout_configs(&state, &pc_workers, &pc_threshold);
 	else
 		pc_workers = 1;
 

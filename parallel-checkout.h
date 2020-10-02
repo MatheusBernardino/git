@@ -15,7 +15,8 @@ enum pc_status {
 };
 
 enum pc_status parallel_checkout_status(void);
-void get_parallel_checkout_configs(int *num_workers, int *threshold);
+void get_parallel_checkout_configs(struct checkout *state, int *num_workers,
+				   int *threshold);
 void init_parallel_checkout(void);
 
 /*
