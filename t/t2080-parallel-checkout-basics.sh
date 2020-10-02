@@ -167,4 +167,45 @@ test_expect_success SYMLINKS,CASE_INSENSITIVE_FS 'symlink colliding with leading
 	)
 '
 
+if test "$(uname -s)" = Linux
+then
+	test_set_prereq LINUX
+fi
+
+test_expect_success LINUX 'defaults to sequential version for non-NFS checkouts (on Linux)' '
+	echo "none / ext4 defaults 0 0" >mtab-non-nfs &&
+	GIT_TEST_MTAB_PATH="$PWD/mtab-non-nfs" GIT_TRACE2_EVENT="$PWD/trace-non-nfs" \
+		git clone various various-non-nfs &&
+	grep "\"category\":\"parallel-checkout\",\"key\":\"num_workers\",\"value\":\"1\"" trace-non-nfs
+'
+
+test_expect_success LINUX 'auto-parallelizes NFS checkouts (on Linux)' '
+	echo "none / nfs4 defaults 0 0" >mtab-nfs &&
+	GIT_TEST_MTAB_PATH="$PWD/mtab-nfs" GIT_TRACE2_EVENT="$PWD/trace-nfs" \
+		git clone various various-nfs &&
+	grep "\"category\":\"parallel-checkout\",\"key\":\"num_workers\",\"value\":\"16\"" trace-nfs
+'
+
+mtab_escape()
+{
+	printf "%s" "$@" |
+	sed -e 's/\\/\\134/g' -e 's/ /\\040/g' -e 's/\t/\\011/g' -e 's/\n/\\012/g'
+}
+
+# Also test more unusual cases, with an escaped mount point and a checkout
+# prefix containing: uncommon chars, symlinks, and nonexistent directories.
+#
+test_expect_success LINUX,SYMLINKS,FUNNYNAMES 'auto-parallelizes NFS checkout with funny prefix (on Linux)' '
+	nfs_dir="$PWD/dir\\ with\nfunny\tchars" &&
+	mkdir "$nfs_dir" &&
+	ln -s "$nfs_dir" nfs-link &&
+
+	echo "none / ext4 defaults 0 0" >mtab-nfs2 &&
+	printf "none %s nfs defaults 0 0" "$(mtab_escape "$nfs_dir")" >>mtab-nfs2 &&
+
+	GIT_TEST_MTAB_PATH="$PWD/mtab-nfs2" GIT_TRACE2_EVENT="$PWD/trace-nfs2" \
+		git -C various checkout-index --prefix=../nfs-link/sub/other/ --all &&
+	grep "\"category\":\"parallel-checkout\",\"key\":\"num_workers\",\"value\":\"16\"" trace-nfs2
+'
+
 test_done

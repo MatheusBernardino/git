@@ -368,7 +368,7 @@ static int checkout_worktree(const struct checkout_opts *opts,
 	state.istate = &the_index;
 
 	mem_pool_init(&ce_mem_pool, 0);
-	get_parallel_checkout_configs(&pc_workers, &pc_threshold);
+	get_parallel_checkout_configs(&state, &pc_workers, &pc_threshold);
 	init_checkout_metadata(&state.meta, info->refname,
 			       info->commit ? &info->commit->object.oid : &info->oid,
 			       NULL);
