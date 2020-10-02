@@ -167,4 +167,39 @@ test_expect_success SYMLINKS,CASE_INSENSITIVE_FS 'symlink colliding with leading
 	)
 '
 
+if test "$(uname -s)" = Linux
+then
+	test_set_prereq LINUX
+fi
+
+test_expect_success LINUX 'by default, use sequential checkout for non-NFS targets' '
+	echo "none / ext4 defaults 0 0" >mtab-non-nfs &&
+	GIT_TEST_MTAB_PATH="$PWD/mtab-non-nfs" GIT_TRACE2_EVENT="$PWD/trace-non-nfs" \
+		git clone various various-non-nfs &&
+	grep "\"category\":\"parallel-checkout\",\"key\":\"num_workers\",\"value\":\"1\"" trace-non-nfs
+'
+
+escape_for_mtab()
+{
+	echo "$@" | sed -e 's/\\/\\134/g' -e 's/ /\\040/g' -e 's/\t/\\011/g' -e 's/\n/\\012/g'
+}
+
+test_expect_success LINUX,SYMLINKS 'auto-parallelize NFS checkouts on Linux' '
+	echo "none / nfs4 defaults 0 0" >mtab-nfs &&
+	GIT_TEST_MTAB_PATH="$PWD/mtab-nfs" GIT_TRACE2_EVENT="$PWD/trace-nfs" \
+		git clone various various-nfs &&
+	grep "\"category\":\"parallel-checkout\",\"key\":\"num_workers\",\"value\":\"16\"" trace-nfs &&
+
+	# Also check with escaped mount points and a relative checkout path 
+	escaped_pwd="$(escape_for_mtab "$PWD")" &&
+	echo "none / ext4 defaults 0 0" >mtab-nfs2 &&
+	# Some echos might convert the escaped chars back
+	printf "none %s/nfs nfs defaults 0 0" "$escaped_pwd" >>mtab-nfs2 &&
+	mkdir nfs &&
+	ln -s nfs nfs-link &&
+	GIT_TEST_MTAB_PATH="$PWD/mtab-nfs2" GIT_TRACE2_EVENT="$PWD/trace-nfs2" \
+		git -C various checkout-index --prefix=../nfs-link/dir/other/ --all &&
+	grep "\"category\":\"parallel-checkout\",\"key\":\"num_workers\",\"value\":\"16\"" trace-nfs2
+'
+
 test_done

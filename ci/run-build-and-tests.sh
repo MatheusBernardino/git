@@ -13,6 +13,7 @@ esac
 make
 case "$jobname" in
 linux-gcc)
+	export GIT_TEST_CHECKOUT_WORKERS=1
 	make test
 	export GIT_TEST_SPLIT_INDEX=yes
 	export GIT_TEST_FULL_IN_PACK_ARRAY=true
