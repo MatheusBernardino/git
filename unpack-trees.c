@@ -462,7 +462,7 @@ static int check_updates(struct unpack_trees_options *o,
 		oid_array_clear(&to_fetch);
 	}
 
-	get_parallel_checkout_configs(&pc_workers, &pc_threshold);
+	get_parallel_checkout_configs(&state, &pc_workers, &pc_threshold);
 
 	enable_delayed_checkout(&state);
 	if (pc_workers > 1)

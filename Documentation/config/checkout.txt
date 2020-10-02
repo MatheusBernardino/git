@@ -19,17 +19,22 @@ commands or functionality in the future.
 
 checkout.workers::
 	The number of parallel workers to use when updating the working tree.
-	The default is one, i.e. sequential execution. If set to a value less
+	The default is one, i.e. sequential execution, unless the checkout path
+	resides in an NFS mount (more on this below). If set to a value less
 	than one, Git will use as many workers as the number of logical cores
-	available. This setting and checkout.thresholdForParallelism affect all
-	commands that perform checkout. E.g. checkout, switch, clone, reset,
-	sparse-checkout, read-tree, etc.
+	available. This setting and `checkout.thresholdForParallelism` affect
+	all commands that perform checkout. E.g. checkout, switch, clone,
+	reset, sparse-checkout, read-tree, etc.
 +
-Note: parallel checkout usually delivers better performance for repositories
-located on SSDs or over NFS. For repositories on spinning disks and/or machines
-with a small number of cores, the default sequential checkout often performs
-better. The size and compression level of a repository might also influence how
-well the parallel version performs.
+Parallel checkout usually delivers the best performance for repositories located
+on SSDs or over NFS. For repositories on spinning disks and machines with a
+small number of cores, the default sequential checkout is often faster. (The
+size and compression level of a repository might also influence how well the
+parallel version performs.) On Linux, if `checkout.workers` is unset, Git will
+try to detect the type of the target file system, and automatically enable
+parallelism for NFS and EFS (Amazon Elastic File System). In these cases, the
+default number of workers is 32 and 64, respectively. Setting
+`checkout.workers` (to any value) will disable the file system type detection.
 
 checkout.thresholdForParallelism::
 	When running parallel checkout with a small number of files, the cost
