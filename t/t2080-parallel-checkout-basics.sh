@@ -11,18 +11,6 @@ TEST_NO_CREATE_REPO=1
 . ./test-lib.sh
 . "$TEST_DIRECTORY/lib-parallel-checkout.sh"
 
-# NEEDSWORK: cloning a SHA1 repo with GIT_TEST_DEFAULT_HASH set to "sha256"
-# currently produces a wrong result (See
-# https://lore.kernel.org/git/20200911151717.43475-1-matheus.bernardino@usp.br/).
-# So we skip the "parallel-checkout during clone" tests when this test flag is
-# set to "sha256". Remove this when the bug is fixed.
-#
-if test "$GIT_TEST_DEFAULT_HASH" = "sha256"
-then
-	skip_all="t2080 currently don't work with GIT_TEST_DEFAULT_HASH=sha256"
-	test_done
-fi
-
 R_BASE=$GIT_BUILD_DIR
 
 test_expect_success 'sequential clone' '
