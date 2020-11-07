@@ -167,4 +167,31 @@ test_expect_success SYMLINKS,CASE_INSENSITIVE_FS 'symlink colliding with leading
 	)
 '
 
+escape_for_mtab()
+{
+	echo "$@" | sed -e 's/\\/\\0134/g' -e 's/ /\\040/g' -e 's/\t/\\011/g' -e 's/\n/\\012/g'
+}
+
+if test "$(uname -s)" = Linux
+then
+	test_set_prereq LINUX
+fi
+
+test_expect_success LINUX,SYMLINKS 'auto-parallelism for NFS checkouts on Linux' '
+	echo "fs / nfs4 rw,noatime 0 0" >mtab &&
+	GIT_TEST_PATH_MOUNTED="$PWD/mtab" GIT_TRACE2_EVENT="$PWD/trace" \
+		git clone various various-nfs &&
+	grep "\"category\":\"parallel-checkout\",\"key\":\"num_workers\",\"value\":\"16\"" trace &&
+
+	# Also check the path resolution code and prefix matching
+	escaped_pwd="$(escape_for_mtab "$PWD")" &&
+	echo "fs $escaped_pwd ext4 rw,noatime 0 0" >mtab2 &&
+	echo "fs $escaped_pwd/nfs nfs rw,noatime 0 0" >>mtab2 &&
+	mkdir nfs &&
+	ln -s nfs nfs-link &&
+	GIT_TEST_PATH_MOUNTED="$PWD/mtab2" GIT_TRACE2_EVENT="$PWD/trace2" \
+		git -C various checkout-index --prefix=../nfs-link/dir/other/ --all &&
+	grep "\"category\":\"parallel-checkout\",\"key\":\"num_workers\",\"value\":\"16\"" trace2
+'
+
 test_done

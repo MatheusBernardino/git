@@ -58,7 +58,10 @@ static int is_nfs_checkout(struct checkout *state)
 	int ret = 0, longest_mnt_prefix = 0;
 	struct strbuf checkout_path = STRBUF_INIT, mnt_type = STRBUF_INIT;
 	struct mntent *mntent;
-	FILE *mntfile = setmntent(_PATH_MOUNTED, "r");
+	FILE *mntfile;
+	char *env_path_mounted = getenv("GIT_TEST_PATH_MOUNTED");
+
+	mntfile = setmntent(env_path_mounted ? env_path_mounted : _PATH_MOUNTED, "r");
 
 	if (!mntfile)
 		return 0;
@@ -124,6 +127,8 @@ void get_parallel_checkout_configs(struct checkout *state, int *num_workers,
 
 	if (git_config_get_int("checkout.thresholdForParallelism", threshold))
 		*threshold = DEFAULT_THRESHOLD_FOR_PARALLELISM;
+
+	trace2_data_intmax("parallel-checkout", NULL, "num_workers", *num_workers);
 }
 
 void init_parallel_checkout(void)
