@@ -892,4 +892,26 @@ test_expect_success 'rm empty string should fail' '
 	test_must_fail git rm -rf ""
 '
 
+test_expect_success 'rm should respect --[no]-restrict-to-sparse-paths' '
+	git init sparse-repo &&
+	(
+		cd sparse-repo &&
+		touch a b c &&
+		git add -A &&
+		git commit -m files &&
+		git sparse-checkout set "/a" &&
+
+		# By default, it should not rm paths outside the sparse-checkout
+		test_must_fail git rm b 2>stderr &&
+		test_i18ngrep "fatal: pathspec .b. did not match any files" stderr &&
+
+		# But it should rm them with --no-restrict-to-sparse-paths
+		git --no-restrict-to-sparse-paths rm b &&
+
+		# And also with sparse.restrictCmds=false
+		git reset &&
+		git -c sparse.restrictCmds=false rm b
+	)
+'
+
 test_done
