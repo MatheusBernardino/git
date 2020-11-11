@@ -25,6 +25,16 @@ When `--cached` is given, the staged content has to
 match either the tip of the branch or the file on disk,
 allowing the file to be removed from just the index.
 
+CONFIGURATION
+-------------
+
+sparse.restrictCmds::
+	When sparse-checkouts are in use, by default git-rm will only
+	match and remove paths within the sparse-checkout patterns.
+	This behavior can be changed with the `sparse.restrictCmds`
+	setting or the global `--no-restrict-to-sparse-paths` option.
+	For more details, see the full `sparse.restrictCmds` definition
+	in linkgit:git-config[1].
 
 OPTIONS
 -------

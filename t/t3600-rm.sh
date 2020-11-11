@@ -892,4 +892,52 @@ test_expect_success 'rm empty string should fail' '
 	test_must_fail git rm -rf ""
 '
 
+test_expect_success 'rm should respect --[no]-restrict-to-sparse-paths' '
+	git init sparse-repo &&
+	(
+		cd sparse-repo &&
+		touch a b c &&
+		git add -A &&
+		git commit -m files &&
+		git sparse-checkout set "/a" &&
+
+		# By default, it should not rm paths outside the sparse-checkout
+		test_must_fail git rm b 2>stderr &&
+		test_i18ngrep "fatal: pathspec .b. did not match any files" stderr &&
+		test_i18ngrep "disable sparse.restrictCmds if you intend to edit outside" stderr &&
+
+		# But it should rm them with --no-restrict-to-sparse-paths
+		git --no-restrict-to-sparse-paths rm b &&
+
+		# And also with sparse.restrictCmds=false
+		git reset &&
+		git -c sparse.restrictCmds=false rm b
+	)
+'
+
+test_expect_success 'recursive rm should respect --[no]-restrict-to-sparse-paths' '
+	git init sparse-repo-2 &&
+	(
+		cd sparse-repo-2 &&
+		mkdir -p sub/dir &&
+		touch sub/f1 sub/dir/f2 &&
+		git add -A &&
+		git commit -m files &&
+		git sparse-checkout set "sub/dir" &&
+
+		git rm -r sub &&
+		echo "D  sub/dir/f2" >expected &&
+		git status --porcelain -uno >actual &&
+		test_cmp expected actual &&
+
+		git reset &&
+		git --no-restrict-to-sparse-paths rm -r sub &&
+		echo "D  sub/dir/f2" >expected-no-restrict &&
+		echo "D  sub/f1"     >>expected-no-restrict &&
+		git status --porcelain -uno >actual-no-restrict &&
+		test_cmp expected-no-restrict actual-no-restrict
+
+	)
+'
+
 test_done

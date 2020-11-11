@@ -14,6 +14,7 @@
 #include "string-list.h"
 #include "submodule.h"
 #include "pathspec.h"
+#include "sparse-checkout.h"
 
 static const char * const builtin_rm_usage[] = {
 	N_("git rm [<options>] [--] <file>..."),
@@ -254,7 +255,7 @@ static struct option builtin_rm_options[] = {
 int cmd_rm(int argc, const char **argv, const char *prefix)
 {
 	struct lock_file lock_file = LOCK_INIT;
-	int i;
+	int i, sparse_paths_only;
 	struct pathspec pathspec;
 	char *seen;
 
@@ -293,8 +294,13 @@ int cmd_rm(int argc, const char **argv, const char *prefix)
 
 	seen = xcalloc(pathspec.nr, 1);
 
+	sparse_paths_only = core_apply_sparse_checkout &&
+			    restrict_to_sparse_paths(the_repository);
+
 	for (i = 0; i < active_nr; i++) {
 		const struct cache_entry *ce = active_cache[i];
+		if (sparse_paths_only && ce_skip_worktree(ce))
+			continue;
 		if (!ce_path_match(&the_index, ce, &pathspec, seen))
 			continue;
 		ALLOC_GROW(list.entry, list.nr + 1, list.alloc);
@@ -310,15 +316,18 @@ int cmd_rm(int argc, const char **argv, const char *prefix)
 		int seen_any = 0;
 		for (i = 0; i < pathspec.nr; i++) {
 			original = pathspec.items[i].original;
-			if (!seen[i]) {
-				if (!ignore_unmatch) {
-					die(_("pathspec '%s' did not match any files"),
-					    original);
-				}
-			}
-			else {
+			if (seen[i]) {
 				seen_any = 1;
+			} else if (!ignore_unmatch) {
+				const char *sparse_config_advice =
+					_("; disable sparse.restrictCmds if you intend to edit"
+					  " outside the current sparse-checkout definition");
+
+				die(_("pathspec '%s' did not match any files%s"),
+				    original,
+				    sparse_paths_only ? sparse_config_advice : "");
 			}
+
 			if (!recursive && seen[i] == MATCHED_RECURSIVELY)
 				die(_("not removing '%s' recursively without -r"),
 				    *original ? original : ".");

@@ -132,9 +132,9 @@ test_expect_success 'diff-files does not examine skip-worktree dirty entries' '
 	test -z "$(git diff-files -- one)"
 '
 
-test_expect_success 'git-rm succeeds on skip-worktree absent entries' '
+test_expect_success 'git-rm succeeds on skip-worktree absent entries when sparse.restrictCmds=false' '
 	setup_absent &&
-	git rm 1
+	git -c sparse.restrictCmds=false rm 1
 '
 
 test_expect_success 'commit on skip-worktree absent entries' '

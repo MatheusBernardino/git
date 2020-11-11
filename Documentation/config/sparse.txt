@@ -12,7 +12,8 @@ When this option is true (default), some git commands may limit their behavior
 to the paths specified by the sparsity patterns, or to the intersection of
 those paths and any (like `*.c`) that the user might also specify on the
 command line. When false, the affected commands will work on full trees,
-ignoring the sparsity patterns. For now, only git-grep honors this setting.
+ignoring the sparsity patterns. For now, only git-grep and git-rm honor this
+setting.
 +
 Note: commands which export, integrity check, or create history will always
 operate on full trees (e.g. fast-export, format-patch, fsck, commit, etc.),
