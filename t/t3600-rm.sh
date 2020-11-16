@@ -895,4 +895,40 @@ test_expect_success 'rm empty string should fail' '
 	test_must_fail git rm -rf ""
 '
 
+test_expect_success 'setup sparse checked out repo' '
+	git init sparse &&
+	(
+		cd sparse &&
+		mkdir -p sub/dir &&
+		touch a b c sub/d sub/dir/e &&
+		git add -A &&
+		git commit -m files
+	)
+'
+
+test_expect_success 'rm should respect sparse-checkout' '
+	git -C sparse sparse-checkout set "/a" &&
+	test_must_fail git -C sparse rm b 2>stderr &&
+	test_i18ngrep "error: pathspec .b. did not match any files" stderr &&
+	test_i18ngrep "Disable or update the sparsity rules" stderr
+'
+
+test_expect_success 'rm should not advise on sparse paths when they do not match the pathspec' '
+	test_must_fail git -C sparse rm nonexistent 2>stderr &&
+	test_i18ngrep "error: pathspec .nonexistent. did not match any files" stderr &&
+	test_i18ngrep ! "Disable or update the sparsity rules" stderr
+'
+
+test_expect_success 'recursive rm should respect sparse-checkout' '
+	(
+		cd sparse &&
+		git reset --hard &&
+		git sparse-checkout set "sub/dir" &&
+		git rm -r sub &&
+		git status --porcelain -uno >../actual
+	) &&
+	echo "D  sub/dir/e" >expected &&
+	test_cmp expected actual
+'
+
 test_done

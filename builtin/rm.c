@@ -5,6 +5,7 @@
  */
 #define USE_THE_INDEX_COMPATIBILITY_MACROS
 #include "builtin.h"
+#include "advice.h"
 #include "config.h"
 #include "lockfile.h"
 #include "dir.h"
@@ -234,6 +235,26 @@ static int check_local_mod(struct object_id *head, int index_only)
 	return errs;
 }
 
+static void advise_on_sparse_paths(struct pathspec *pathspec)
+{
+	int i, matches_sparse_paths = 0;
+
+	if (!advice_enabled(ADVICE_RM_HINTS))
+		return;
+
+	for (i = 0; i < active_nr; i++) {
+		if (ce_skip_worktree(active_cache[i]) &&
+		    ce_path_match(&the_index, active_cache[i], pathspec, NULL)) {
+			matches_sparse_paths = 1;
+			break;
+		}
+	}
+
+	if (matches_sparse_paths)
+		advise(_("Disable or update the sparsity rules if you intend to\n"
+			 "remove any files outside the current sparse checkout."));
+}
+
 static int show_only = 0, force = 0, index_only = 0, recursive = 0, quiet = 0;
 static int ignore_unmatch = 0, pathspec_file_nul;
 static char *pathspec_from_file;
@@ -254,7 +275,7 @@ static struct option builtin_rm_options[] = {
 int cmd_rm(int argc, const char **argv, const char *prefix)
 {
 	struct lock_file lock_file = LOCK_INIT;
-	int i;
+	int i, have_sparse_paths = 0;
 	struct pathspec pathspec;
 	char *seen;
 
@@ -295,6 +316,10 @@ int cmd_rm(int argc, const char **argv, const char *prefix)
 
 	for (i = 0; i < active_nr; i++) {
 		const struct cache_entry *ce = active_cache[i];
+		if (ce_skip_worktree(ce)) {
+			have_sparse_paths = 1;
+			continue;
+		}
 		if (!ce_path_match(&the_index, ce, &pathspec, seen))
 			continue;
 		ALLOC_GROW(list.entry, list.nr + 1, list.alloc);
@@ -310,14 +335,13 @@ int cmd_rm(int argc, const char **argv, const char *prefix)
 		int seen_any = 0;
 		for (i = 0; i < pathspec.nr; i++) {
 			original = pathspec.items[i].original;
-			if (!seen[i]) {
-				if (!ignore_unmatch) {
-					die(_("pathspec '%s' did not match any files"),
-					    original);
-				}
-			}
-			else {
+			if (seen[i]) {
 				seen_any = 1;
+			} else if (!ignore_unmatch) {
+				error(_("pathspec '%s' did not match any files"), original);
+				if (have_sparse_paths)
+					advise_on_sparse_paths(&pathspec);
+				exit(1);
 			}
 			if (!recursive && seen[i] == MATCHED_RECURSIVELY)
 				die(_("not removing '%s' recursively without -r"),
