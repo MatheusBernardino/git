@@ -1,7 +1,7 @@
 #include "cache.h"
 
 static int threaded_check_leading_path(struct cache_def *cache, const char *name, int len);
-static int threaded_has_dirs_only_path(struct cache_def *cache, const char *name, int len, int prefix_len);
+static int threaded_first_non_dir_component(struct cache_def *cache, const char *name, int len, int prefix_len);
 
 /*
  * Returns the length (on a path component basis) of the longest
@@ -246,30 +246,29 @@ static int threaded_check_leading_path(struct cache_def *cache, const char *name
 		return match_len;
 }
 
-/*
- * Return non-zero if all path components of 'name' exists as a
- * directory.  If prefix_len > 0, we will test with the stat()
- * function instead of the lstat() function for a prefix length of
- * 'prefix_len', thus we then allow for symlinks in the prefix part as
- * long as those points to real existing directories.
- */
-int has_dirs_only_path(const char *name, int len, int prefix_len)
+int first_non_dir_component(const char *name, int len, int prefix_len)
 {
-	return threaded_has_dirs_only_path(&default_cache, name, len, prefix_len);
+	return threaded_first_non_dir_component(&default_cache, name, len, prefix_len);
 }
 
 /*
- * Return non-zero if all path components of 'name' exists as a
- * directory.  If prefix_len > 0, we will test with the stat()
- * function instead of the lstat() function for a prefix length of
- * 'prefix_len', thus we then allow for symlinks in the prefix part as
- * long as those points to real existing directories.
+ * Return -1 if all leading components of 'name' exists as a directory.
+ * Otherwise return the length of the first non-dir component, or the first
+ * component to give an lstat() error. If prefix_len > 0, we will test with the
+ * stat() function instead of the lstat() function for a prefix length of
+ * 'prefix_len', thus we then allow for symlinks in the prefix part as long as
+ * those points to real existing directories.
  */
-static int threaded_has_dirs_only_path(struct cache_def *cache, const char *name, int len, int prefix_len)
+static int threaded_first_non_dir_component(struct cache_def *cache,
+					    const char *name, int len,
+					    int prefix_len)
 {
-	return lstat_cache(cache, name, len,
-			   FL_DIR|FL_FULLPATH, prefix_len) &
-		FL_DIR;
+	int flags;
+	int match_len = lstat_cache_matchlen(cache, name, len, &flags,
+					     FL_DIR, prefix_len);
+	if (flags & FL_DIR)
+		return -1;
+	return match_len;
 }
 
 static struct strbuf removal = STRBUF_INIT;

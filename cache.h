@@ -1721,7 +1721,7 @@ static inline void cache_def_clear(struct cache_def *cache)
 int has_symlink_leading_path(const char *name, int len);
 int threaded_has_symlink_leading_path(struct cache_def *, const char *, int);
 int check_leading_path(const char *name, int len);
-int has_dirs_only_path(const char *name, int len, int prefix_len);
+int first_non_dir_component(const char *name, int len, int prefix_len);
 void schedule_dir_for_removal(const char *name, int len);
 void remove_scheduled_dirs(void);
 

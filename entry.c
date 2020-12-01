@@ -9,30 +9,25 @@
 #include "entry.h"
 #include "parallel-checkout.h"
 
-static void create_directories(const char *path, int path_len,
+static void create_directories(char *path, int path_len, int non_dir_len,
 			       const struct checkout *state)
 {
-	char *buf = xmallocz(path_len);
-	int len = 0;
+	int len;
 
-	while (len < path_len) {
-		do {
-			buf[len] = path[len];
+	/* All leading components are already directories. */
+	if (non_dir_len < 0)
+		return;
+
+	for (len = non_dir_len; len < path_len; len++) {
+		char slash_char;
+
+		while (len < path_len && !is_dir_sep(path[len]))
 			len++;
-		} while (len < path_len && !is_dir_sep(path[len]));
 		if (len >= path_len)
 			break;
-		buf[len] = 0;
 
-		/*
-		 * For 'checkout-index --prefix=<dir>', <dir> is
-		 * allowed to be a symlink to an existing directory,
-		 * and we set 'state->base_dir_len' below, such that
-		 * we test the path components of the prefix with the
-		 * stat() function instead of the lstat() function.
-		 */
-		if (has_dirs_only_path(buf, len, state->base_dir_len))
-			continue; /* ok, it is already a directory. */
+		slash_char = path[len];
+		path[len] = '\0';
 
 		/*
 		 * If this mkdir() would fail, it could be that there
@@ -40,14 +35,17 @@ static void create_directories(const char *path, int path_len,
 		 * there, therefore we then try to unlink it and try
 		 * one more time to create the directory.
 		 */
-		if (mkdir(buf, 0777)) {
+		if (mkdir(path, 0777)) {
 			if (errno == EEXIST && state->force &&
-			    !unlink_or_warn(buf) && !mkdir(buf, 0777))
+			    !unlink_or_warn(path) && !mkdir(path, 0777)) {
+				path[len] = slash_char;
 				continue;
-			die_errno("cannot create directory at '%s'", buf);
+			}
+			die_errno("cannot create directory at '%s'", path);
 		}
+
+		path[len] = slash_char;
 	}
-	free(buf);
 }
 
 static void remove_subtree(struct strbuf *path)
@@ -396,23 +394,6 @@ delayed:
 	return 0;
 }
 
-/*
- * This is like 'lstat()', except it refuses to follow symlinks
- * in the path, after skipping "skiplen".
- */
-static int check_path(const char *path, int len, struct stat *st, int skiplen)
-{
-	const char *slash = path + len;
-
-	while (path < slash && !is_dir_sep(*slash))
-		slash--;
-	if (!has_dirs_only_path(path, slash - path, skiplen)) {
-		errno = ENOENT;
-		return -1;
-	}
-	return lstat(path, st);
-}
-
 static void mark_colliding_entries(const struct checkout *state,
 				   struct cache_entry *ce, struct stat *st)
 {
@@ -457,6 +438,7 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 	static struct strbuf path = STRBUF_INIT;
 	struct stat st;
 	struct conv_attrs ca_buf;
+	int non_dir_len;
 
 	if (ce->ce_flags & CE_WT_REMOVE) {
 		if (topath)
@@ -490,7 +472,10 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 	strbuf_add(&path, state->base_dir, state->base_dir_len);
 	strbuf_add(&path, ce->name, ce_namelen(ce));
 
-	if (!check_path(path.buf, path.len, &st, state->base_dir_len)) {
+	non_dir_len = first_non_dir_component(path.buf, path.len,
+					     state->base_dir_len);
+
+	if (non_dir_len == -1 && !lstat(path.buf, &st)) {
 		const struct submodule *sub;
 		unsigned changed = ie_match_stat(state->istate, ce, &st,
 						 CE_MATCH_IGNORE_VALID | CE_MATCH_IGNORE_SKIP_WORKTREE);
@@ -545,7 +530,7 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 	} else if (state->not_new)
 		return 0;
 
-	create_directories(path.buf, path.len, state);
+	create_directories(path.buf, path.len, non_dir_len, state);
 
 	if (nr_checkouts)
 		(*nr_checkouts)++;
