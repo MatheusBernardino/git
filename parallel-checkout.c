@@ -1,9 +1,11 @@
 #include "cache.h"
+#include "config.h"
 #include "entry.h"
 #include "parallel-checkout.h"
 #include "pkt-line.h"
 #include "run-command.h"
 #include "streaming.h"
+#include "thread-utils.h"
 
 struct pc_worker {
 	struct child_process cp;
@@ -21,6 +23,19 @@ static struct parallel_checkout parallel_checkout;
 enum pc_status parallel_checkout_status(void)
 {
 	return parallel_checkout.status;
+}
+
+#define DEFAULT_THRESHOLD_FOR_PARALLELISM 100
+
+void get_parallel_checkout_configs(int *num_workers, int *threshold)
+{
+	if (git_config_get_int("checkout.workers", num_workers))
+		*num_workers = 1;
+	else if (*num_workers < 1)
+		*num_workers = online_cpus();
+
+	if (git_config_get_int("checkout.thresholdForParallelism", threshold))
+		*threshold = DEFAULT_THRESHOLD_FOR_PARALLELISM;
 }
 
 void init_parallel_checkout(void)
@@ -554,11 +569,9 @@ static void write_items_sequentially(struct checkout *state)
 		write_pc_item(&parallel_checkout.items[i], state);
 }
 
-#define DEFAULT_NUM_WORKERS 2
-
-int run_parallel_checkout(struct checkout *state)
+int run_parallel_checkout(struct checkout *state, int num_workers, int threshold)
 {
-	int ret, num_workers = DEFAULT_NUM_WORKERS;
+	int ret;
 
 	if (parallel_checkout.status != PC_ACCEPTING_ENTRIES)
 		BUG("cannot run parallel checkout: uninitialized or already running");
@@ -568,7 +581,7 @@ int run_parallel_checkout(struct checkout *state)
 	if (parallel_checkout.nr < num_workers)
 		num_workers = parallel_checkout.nr;
 
-	if (num_workers <= 1) {
+	if (num_workers <= 1 || parallel_checkout.nr < threshold) {
 		write_items_sequentially(state);
 	} else {
 		struct pc_worker *workers = setup_workers(state, num_workers);
