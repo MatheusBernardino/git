@@ -90,12 +90,10 @@ test_expect_success POSIXPERM 'do not use core.sharedRepository for working tree
 		rm -rf d f1 &&
 		git apply patch-f1-and-f2.txt &&
 
-		echo "-rw-------" >f1_mode.expected &&
-		echo "drwx------" >d_mode.expected &&
-		test_modebits f1 >f1_mode.actual &&
-		test_modebits d >d_mode.actual &&
-		test_cmp f1_mode.expected f1_mode.actual &&
-		test_cmp d_mode.expected d_mode.actual
+		test_modebits f1 >f1_mode &&
+		test_modebits d >d_mode &&
+		grep "^-rw-------$" f1_mode &&
+		grep "^drwx--[-S]---$" d_mode
 	)
 '
 
