@@ -358,10 +358,13 @@ static int write_entry(struct cache_entry *ce,
 		if (mkdir(path, 0777) < 0)
 			return error("cannot create submodule directory %s", path);
 		sub = submodule_from_ce(ce);
-		if (sub)
+		if (sub) {
+			if (to_tempfile || state->base_dir_len)
+				return error("can't checkout submodule outside the working tree");
 			return submodule_move_head(ce->name,
 				NULL, oid_to_hex(&ce->oid),
 				state->force ? SUBMODULE_MOVE_HEAD_FORCE : 0);
+		}
 		break;
 
 	default:
@@ -472,6 +475,10 @@ int checkout_entry(struct cache_entry *ce, const struct checkout *state,
 		sub = submodule_from_ce(ce);
 		if (sub) {
 			int err;
+
+			if (topath || state->base_dir_len)
+				return error("can't checkout submodule outside the working tree");
+
 			if (!is_submodule_populated_gently(ce->name, &err)) {
 				struct stat sb;
 				if (lstat(ce->name, &sb))
