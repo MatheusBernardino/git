@@ -96,16 +96,28 @@ static void *read_blob_entry(const struct cache_entry *ce, unsigned long *size)
 	return NULL;
 }
 
-static int open_output_fd(char *path, const struct cache_entry *ce, int to_tempfile)
+static int open_output_fd(char *path, const struct cache_entry *ce,
+			  int to_tempfile, int warn_on_error)
 {
 	int symlink = (ce->ce_mode & S_IFMT) != S_IFREG;
+	int fd;
+
 	if (to_tempfile) {
 		xsnprintf(path, TEMPORARY_FILENAME_LENGTH, "%s",
 			  symlink ? ".merge_link_XXXXXX" : ".merge_file_XXXXXX");
-		return mkstemp(path);
+		fd = mkstemp(path);
+		if (fd < 0) {
+			if (warn_on_error)
+				error_errno("unable to create unique tempname from '%s'",
+					    path);
+			path[0] = '\0';
+		}
 	} else {
-		return create_file(path, !symlink ? ce->ce_mode : 0666);
+		fd = create_file(path, !symlink ? ce->ce_mode : 0666);
+		if (fd < 0 && warn_on_error)
+			error_errno("unable to create file %s", path);
 	}
+	return fd;
 }
 
 static int fstat_output(int fd, const struct checkout *state, struct stat *st)
@@ -126,7 +138,7 @@ static int streaming_write_entry(const struct cache_entry *ce, char *path,
 	int result = 0;
 	int fd;
 
-	fd = open_output_fd(path, ce, to_tempfile);
+	fd = open_output_fd(path, ce, to_tempfile, 0);
 	if (fd < 0)
 		return -1;
 
@@ -337,10 +349,10 @@ static int write_entry(struct cache_entry *ce,
 		 */
 
 	write_file_entry:
-		fd = open_output_fd(path, ce, to_tempfile);
+		fd = open_output_fd(path, ce, to_tempfile, 1);
 		if (fd < 0) {
 			free(new_blob);
-			return error_errno("unable to create file %s", path);
+			return -1; /* error already reported */
 		}
 
 		wrote = write_in_full(fd, new_blob, size);
