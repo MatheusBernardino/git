@@ -28,10 +28,22 @@ test_sparse_entry_unchanged () {
 	test_cmp expected actual
 }
 
+cat >sparse_entry_error <<-EOF
+The following pathspecs only matched index entries outside the current
+sparse checkout:
+sparse_entry
+EOF
+
+cat >error_and_hint sparse_entry_error - <<-EOF
+hint: Disable or modify the sparsity rules if you intend to update such entries.
+hint: Disable this message with "git config advice.updateSparsePath false"
+EOF
+
 test_expect_success 'git add does not remove sparse entries' '
 	setup_sparse_entry &&
 	rm sparse_entry &&
-	git add sparse_entry &&
+	test_must_fail git add sparse_entry 2>stderr &&
+	test_i18ncmp error_and_hint stderr &&
 	test_sparse_entry_unchanged
 '
 
@@ -55,7 +67,8 @@ do
 	test_expect_success "git add${opt:+ $opt} does not update sparse entries" '
 		setup_sparse_entry &&
 		echo modified >sparse_entry &&
-		git add $opt sparse_entry &&
+		test_must_fail git add $opt sparse_entry 2>stderr &&
+		test_i18ncmp error_and_hint stderr &&
 		test_sparse_entry_unchanged
 	'
 done
@@ -64,14 +77,16 @@ test_expect_success 'git add --refresh does not update sparse entries' '
 	setup_sparse_entry &&
 	git ls-files --debug sparse_entry | grep mtime >before &&
 	test-tool chmtime -60 sparse_entry &&
-	git add --refresh sparse_entry &&
+	test_must_fail git add --refresh sparse_entry 2>stderr &&
+	test_i18ncmp error_and_hint stderr &&
 	git ls-files --debug sparse_entry | grep mtime >after &&
 	test_cmp before after
 '
 
 test_expect_success 'git add --chmod does not update sparse entries' '
 	setup_sparse_entry &&
-	git add --chmod=+x sparse_entry &&
+	test_must_fail git add --chmod=+x sparse_entry 2>stderr &&
+	test_i18ncmp error_and_hint stderr &&
 	test_sparse_entry_unchanged &&
 	! test -x sparse_entry
 '
@@ -80,8 +95,41 @@ test_expect_success 'git add --renormalize does not update sparse entries' '
 	test_config core.autocrlf false &&
 	setup_sparse_entry "LINEONE\r\nLINETWO\r\n" &&
 	echo "sparse_entry text=auto" >.gitattributes &&
-	git add --renormalize sparse_entry &&
+	test_must_fail git add --renormalize sparse_entry 2>stderr &&
+	test_i18ncmp error_and_hint stderr &&
 	test_sparse_entry_unchanged
+'
+
+test_expect_success 'git add --dry-run --ignore-missing warn on sparse path' '
+	setup_sparse_entry &&
+	rm sparse_entry &&
+	test_must_fail git add --dry-run --ignore-missing sparse_entry 2>stderr &&
+	test_i18ncmp error_and_hint stderr &&
+	test_sparse_entry_unchanged
+'
+
+test_expect_success 'do not advice about sparse entries when they do not match the pathspec' '
+	setup_sparse_entry &&
+	test_must_fail git add nonexistent 2>stderr &&
+	test_i18ngrep "fatal: pathspec .nonexistent. did not match any files" stderr &&
+	test_i18ngrep ! "The following pathspecs only matched index entries" stderr
+'
+
+test_expect_success 'do not warn when pathspec matches dense entries' '
+	setup_sparse_entry &&
+	echo modified >sparse_entry &&
+	>dense_entry &&
+	git add "*_entry" 2>stderr &&
+	test_must_be_empty stderr &&
+	test_sparse_entry_unchanged &&
+	git ls-files --error-unmatch dense_entry
+'
+
+test_expect_success 'add obeys advice.updateSparsePath' '
+	setup_sparse_entry &&
+	test_must_fail git -c advice.updateSparsePath=false add sparse_entry 2>stderr &&
+	test_i18ncmp sparse_entry_error stderr
+
 '
 
 test_done
