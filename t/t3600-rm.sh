@@ -907,4 +907,58 @@ test_expect_success 'rm empty string should fail' '
 	test_must_fail git rm -rf ""
 '
 
+test_expect_success 'setup repo for tests with sparse-checkout' '
+	git init sparse &&
+	(
+		cd sparse &&
+		mkdir -p sub/dir &&
+		touch a b c sub/d sub/dir/e &&
+		git add -A &&
+		git commit -m files
+	) &&
+
+	cat >sparse_entry_b_error <<-EOF &&
+	The following pathspecs only matched index entries outside the current
+	sparse checkout:
+	b
+	EOF
+
+	cat >b_error_and_hint sparse_entry_b_error - <<-EOF
+	hint: Disable or modify the sparsity rules if you intend to update such entries.
+	hint: Disable this message with "git config advice.updateSparsePath false"
+	EOF
+'
+
+test_expect_success 'rm should respect sparse-checkout' '
+	git -C sparse sparse-checkout set "/a" &&
+	test_must_fail git -C sparse rm b 2>stderr &&
+	test_i18ncmp b_error_and_hint stderr
+'
+
+test_expect_success 'rm obeys advice.updateSparsePath' '
+	git -C sparse reset --hard &&
+	git -C sparse sparse-checkout set "/a" &&
+	test_must_fail git -C sparse -c advice.updateSparsePath=false rm b 2>stderr &&
+	test_i18ncmp sparse_entry_b_error stderr
+
+'
+
+test_expect_success 'recursive rm should respect sparse-checkout' '
+	(
+		cd sparse &&
+		git reset --hard &&
+		git sparse-checkout set "sub/dir" &&
+		git rm -r sub &&
+		git status --porcelain -uno >../actual
+	) &&
+	echo "D  sub/dir/e" >expected &&
+	test_cmp expected actual
+'
+
+test_expect_success 'do not advice about sparse entries when they do not match the pathspec' '
+	test_must_fail git -C sparse rm nonexistent 2>stderr &&
+	test_i18ngrep "fatal: pathspec .nonexistent. did not match any files" stderr &&
+	test_i18ngrep ! "The following pathspecs only matched index entries" stderr
+'
+
 test_done
