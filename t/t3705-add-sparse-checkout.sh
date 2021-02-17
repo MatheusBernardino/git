@@ -75,13 +75,13 @@ test_expect_success 'git add --refresh does not update SKIP_WORKTREE entries' '
 	test_cmp actual expected
 '
 
-test_expect_failure 'git add --chmod does not update SKIP_WORKTREE entries' '
+test_expect_success 'git add --chmod does not update SKIP_WORKTREE entries' '
 	setup_sparse_entry &&
 	git add --chmod=+x sparse_entry &&
 	test_sparse_entry_unchanged
 '
 
-test_expect_failure 'git add --renormalize does not update SKIP_WORKTREE entries' '
+test_expect_success 'git add --renormalize does not update SKIP_WORKTREE entries' '
 	test_config core.autocrlf false &&
 	setup_sparse_entry "LINEONE\r\nLINETWO\r\n" &&
 	echo "sparse_entry text=auto" >.gitattributes &&
