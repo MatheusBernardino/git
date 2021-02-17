@@ -38,7 +38,7 @@ struct update_callback_data {
 	int add_errors;
 };
 
-static void chmod_pathspec(struct pathspec *pathspec, char flip)
+static void chmod_pathspec(struct pathspec *pathspec, char flip, int show_only)
 {
 	int i;
 
@@ -48,7 +48,8 @@ static void chmod_pathspec(struct pathspec *pathspec, char flip)
 		if (pathspec && !ce_path_match(&the_index, ce, pathspec, NULL))
 			continue;
 
-		if (chmod_cache_entry(ce, flip) < 0)
+		if ((show_only && !S_ISREG(ce->ce_mode)) ||
+		    (!show_only && chmod_cache_entry(ce, flip) < 0))
 			fprintf(stderr, "cannot chmod %cx '%s'\n", flip, ce->name);
 	}
 }
@@ -609,7 +610,7 @@ int cmd_add(int argc, const char **argv, const char *prefix)
 		exit_status |= add_files(&dir, flags);
 
 	if (chmod_arg && pathspec.nr)
-		chmod_pathspec(&pathspec, chmod_arg[0]);
+		chmod_pathspec(&pathspec, chmod_arg[0], show_only);
 	unplug_bulk_checkin();
 
 finish:
