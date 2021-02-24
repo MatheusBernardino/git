@@ -1514,6 +1514,7 @@ int refresh_index(struct index_state *istate, unsigned int flags,
 	int quiet = (flags & REFRESH_QUIET) != 0;
 	int not_new = (flags & REFRESH_IGNORE_MISSING) != 0;
 	int ignore_submodules = (flags & REFRESH_IGNORE_SUBMODULES) != 0;
+	int no_sparse_on_seen = (flags & REFRESH_DONT_MARK_SPARSE_MATCHES) != 0;
 	int first = 1;
 	int in_porcelain = (flags & REFRESH_IN_PORCELAIN);
 	unsigned int options = (CE_MATCH_REFRESH |
@@ -1552,12 +1553,14 @@ int refresh_index(struct index_state *istate, unsigned int flags,
 		int filtered = 0;
 		int t2_did_lstat = 0;
 		int t2_did_scan = 0;
+		char *cur_seen;
 
 		ce = istate->cache[i];
 		if (ignore_submodules && S_ISGITLINK(ce->ce_mode))
 			continue;
 
-		if (pathspec && !ce_path_match(istate, ce, pathspec, seen))
+		cur_seen = no_sparse_on_seen && ce_skip_worktree(ce) ? NULL : seen;
+		if (pathspec && !ce_path_match(istate, ce, pathspec, cur_seen))
 			filtered = 1;
 
 		if (ce_stage(ce)) {
