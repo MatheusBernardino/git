@@ -120,6 +120,7 @@ advice.*::
 		Advice shown if a user runs the add command without providing
 		the pathspec parameter.
 	updateSparsePath::
-		Advice shown if the pathspec given to linkgit:git-add[1] only
-		matches index entries outside the current sparse-checkout.
+		Advice shown if the pathspec given to linkgit:git-add[1] or
+		linkgit:git-rm[1] only matches index entries outside the
+		current sparse-checkout.
 --
