@@ -202,6 +202,9 @@ int fill_directory(struct dir_struct *dir,
 	if ((dir->flags & exclusive_flags) == exclusive_flags)
 		BUG("DIR_SHOW_IGNORED and DIR_SHOW_IGNORED_TOO are exclusive");
 
+	if (dir->flags & DIR_COLLECT_IGNORED)
+		dir->matched_ignored = xcalloc(pathspec->nr, 1);
+
 	/*
 	 * Calculate common prefix for the pathspec, and
 	 * use that to optimize the directory walk
@@ -2014,9 +2017,10 @@ static int simplify_away(const char *path, int pathlen,
  *      pathspec
  */
 static int exclude_matches_pathspec(const char *path, int pathlen,
-				    const struct pathspec *pathspec)
+				    const struct pathspec *pathspec,
+				    char *matched_ignored)
 {
-	int i;
+	int i, matched = 0;
 
 	if (!pathspec || !pathspec->nr)
 		return 0;
@@ -2029,19 +2033,23 @@ static int exclude_matches_pathspec(const char *path, int pathlen,
 		       PATHSPEC_ICASE |
 		       PATHSPEC_EXCLUDE);
 
+	assert(matched_ignored);
+
 	for (i = 0; i < pathspec->nr; i++) {
 		const struct pathspec_item *item = &pathspec->items[i];
 		int len = item->nowildcard_len;
 
-		if (len == pathlen &&
-		    !ps_strncmp(item, item->match, path, pathlen))
-			return 1;
-		if (len > pathlen &&
-		    item->match[pathlen] == '/' &&
-		    !ps_strncmp(item, item->match, path, pathlen))
-			return 1;
+		if (matched && matched_ignored[i])
+			continue;
+
+		if ((len == pathlen ||
+		    (len > pathlen && item->match[pathlen] == '/')) &&
+		    !ps_strncmp(item, item->match, path, pathlen)) {
+			matched = 1;
+			matched_ignored[i] = 1;
+		}
 	}
-	return 0;
+	return matched;
 }
 
 static int get_index_dtype(struct index_state *istate,
@@ -2376,8 +2384,8 @@ static void add_path_to_appropriate_result_list(struct dir_struct *dir,
 			dir_add_name(dir, istate, path->buf, path->len);
 		else if ((dir->flags & DIR_SHOW_IGNORED_TOO) ||
 			((dir->flags & DIR_COLLECT_IGNORED) &&
-			exclude_matches_pathspec(path->buf, path->len,
-						 pathspec)))
+			exclude_matches_pathspec(path->buf, path->len, pathspec,
+						 dir->matched_ignored)))
 			dir_add_ignored(dir, istate, path->buf, path->len);
 		break;
 
@@ -3070,6 +3078,7 @@ void dir_clear(struct dir_struct *dir)
 		stk = prev;
 	}
 	strbuf_release(&dir->basebuf);
+	free(dir->matched_ignored);
 
 	dir_init(dir);
 }

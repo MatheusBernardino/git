@@ -620,6 +620,8 @@ int cmd_add(int argc, const char **argv, const char *prefix)
 				continue;
 			if (seen[i])
 				continue;
+			if (dir.matched_ignored && dir.matched_ignored[i])
+				continue;
 			if (matches_skip_worktree(&pathspec, i, &skip_worktree_seen)) {
 				string_list_append(&only_match_skip_worktree,
 						   pathspec.items[i].original);

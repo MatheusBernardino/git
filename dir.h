@@ -302,6 +302,12 @@ struct dir_struct {
 	const char *exclude_per_dir;
 
 	/*
+	 * When DIR_COLLECT_IGNORED is used, matched_ignored[i] shows whether
+	 * the i-th pathspec item matched any ignored file.
+	 */
+	char *matched_ignored;
+
+	/*
 	 * We maintain three groups of exclude pattern lists:
 	 *
 	 * EXC_CMDL lists patterns explicitly given on the command line.

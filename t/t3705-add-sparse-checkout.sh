@@ -152,4 +152,26 @@ test_expect_success 'add obeys advice.updateSparsePath' '
 
 '
 
+test_expect_success 'only warn about sparse paths inside ignored dir with --force' '
+	mkdir foo &&
+	touch foo/x foo/y &&
+	git add foo &&
+	git update-index --skip-worktree foo/x foo/y &&
+	echo foo >.gitignore &&
+
+	# Test with two args to make sure that all pathspecs are checked
+	# against the ignored paths, not just the first matching one
+	test_must_fail git add foo/x foo/y 2>stderr1 &&
+	test_i18ngrep ! "The following pathspecs only matched index entries" stderr1 &&
+	test_i18ngrep "The following paths are ignored by one of your .gitignore" stderr1 &&
+
+	# Should warn about sparse paths with --force
+	test_must_fail git add -f foo/x foo/y 2>stderr2 &&
+	cat sparse_error_header >expect &&
+	echo foo/x >>expect &&
+	echo foo/y >>expect &&
+	cat sparse_hint >>expect &&
+	test_i18ncmp expect stderr2
+'
+
 test_done
