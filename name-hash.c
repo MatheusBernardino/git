@@ -7,6 +7,7 @@
  */
 #include "cache.h"
 #include "thread-utils.h"
+#include "trace2.h"
 
 struct dir_entry {
 	struct hashmap_entry ent;
@@ -577,6 +578,7 @@ static void lazy_init_name_hash(struct index_state *istate)
 	if (istate->name_hash_initialized)
 		return;
 	trace_performance_enter();
+	trace2_region_enter("index", "name-hash-init", istate->repo);
 	hashmap_init(&istate->name_hash, cache_entry_cmp, NULL, istate->cache_nr);
 	hashmap_init(&istate->dir_hash, dir_entry_cmp, NULL, istate->cache_nr);
 
@@ -597,6 +599,7 @@ static void lazy_init_name_hash(struct index_state *istate)
 	}
 
 	istate->name_hash_initialized = 1;
+	trace2_region_leave("index", "name-hash-init", istate->repo);
 	trace_performance_leave("initialize name hash");
 }
 
@@ -726,6 +729,6 @@ void free_name_hash(struct index_state *istate)
 		return;
 	istate->name_hash_initialized = 0;
 
-	hashmap_free(&istate->name_hash);
-	hashmap_free_entries(&istate->dir_hash, struct dir_entry, ent);
+	hashmap_clear(&istate->name_hash);
+	hashmap_clear_and_free(&istate->dir_hash, struct dir_entry, ent);
 }
