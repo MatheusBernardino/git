@@ -6,6 +6,8 @@
 #include "hashmap.h"
 #include "refspec.h"
 
+struct transport_ls_refs_options;
+
 /**
  * The API gives access to the configuration related to remotes. It handles
  * all three configuration mechanisms historically and currently used by Git,
@@ -107,12 +109,20 @@ struct ref {
 	struct object_id new_oid;
 	struct object_id old_oid_expect; /* used by expect-old */
 	char *symref;
+	char *tracking_ref;
 	unsigned int
 		force:1,
 		forced_update:1,
 		expect_old_sha1:1,
 		exact_oid:1,
-		deletion:1;
+		deletion:1,
+		/* Need to check if local reflog reaches the remote tip. */
+		check_reachable:1,
+		/*
+		 * Store the result of the check enabled by "check_reachable";
+		 * implies the local reflog does not reach the remote tip.
+		 */
+		unreachable:1;
 
 	enum {
 		REF_NOT_MATCHED = 0, /* initial value */
@@ -126,7 +136,7 @@ struct ref {
 	 * should be 0, so that xcalloc'd structures get it
 	 * by default.
 	 */
-	enum {
+	enum fetch_head_status {
 		FETCH_HEAD_MERGE = -1,
 		FETCH_HEAD_NOT_FOR_MERGE = 0,
 		FETCH_HEAD_IGNORE = 1
@@ -142,6 +152,7 @@ struct ref {
 		REF_STATUS_REJECT_NEEDS_FORCE,
 		REF_STATUS_REJECT_STALE,
 		REF_STATUS_REJECT_SHALLOW,
+		REF_STATUS_REJECT_REMOTE_UPDATED,
 		REF_STATUS_UPTODATE,
 		REF_STATUS_REMOTE_REJECT,
 		REF_STATUS_EXPECTING_REPORT,
@@ -187,7 +198,7 @@ struct ref **get_remote_heads(struct packet_reader *reader,
 /* Used for protocol v2 in order to retrieve refs from a remote */
 struct ref **get_remote_refs(int fd_out, struct packet_reader *reader,
 			     struct ref **list, int for_push,
-			     const struct strvec *ref_prefixes,
+			     struct transport_ls_refs_options *transport_options,
 			     const struct string_list *server_options,
 			     int stateless_rpc);
 
@@ -348,6 +359,7 @@ struct ref *get_stale_heads(struct refspec *rs, struct ref *fetch_map);
 
 struct push_cas_option {
 	unsigned use_tracking_for_rest:1;
+	unsigned use_force_if_includes:1;
 	struct push_cas {
 		struct object_id expect;
 		unsigned use_tracking:1;

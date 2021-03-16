@@ -57,6 +57,10 @@ repository is specified as a URL, then this flag is ignored (and we
 never use the local optimizations).  Specifying `--no-local` will
 override the default when `/path/to/repo` is given, using the regular
 Git transport instead.
++
+*NOTE*: this operation can race with concurrent modification to the
+source repository, similar to running `cp -r src dst` while modifying
+`src`.
 
 --no-hardlinks::
 	Force the cloning process from a repository on a local
@@ -183,8 +187,9 @@ objects from the source repository into a pack in the cloned repository.
 
 -o <name>::
 --origin <name>::
-	Instead of using the remote name `origin` to keep track
-	of the upstream repository, use `<name>`.
+	Instead of using the remote name `origin` to keep track of the upstream
+	repository, use `<name>`.  Overrides `clone.defaultRemoteName` from the
+	config.
 
 -b <name>::
 --branch <name>::

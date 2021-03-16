@@ -10,6 +10,7 @@
 #include "shortlog.h"
 #include "parse-options.h"
 #include "trailer.h"
+#include "strmap.h"
 
 static char const * const shortlog_usage[] = {
 	N_("git shortlog [<options>] [<revision-range>] [[--] <path>...]"),
@@ -60,8 +61,7 @@ static void insert_one_record(struct shortlog *log,
 	if (log->summary)
 		item->util = (void *)(UTIL_TO_INT(item) + 1);
 	else {
-		const char *dot3 = log->common_repo_prefix;
-		char *buffer, *p;
+		char *buffer;
 		struct strbuf subject = STRBUF_INIT;
 		const char *eol;
 
@@ -80,17 +80,6 @@ static void insert_one_record(struct shortlog *log,
 			oneline++;
 		format_subject(&subject, oneline, " ");
 		buffer = strbuf_detach(&subject, NULL);
-
-		if (dot3) {
-			int dot3len = strlen(dot3);
-			if (dot3len > 5) {
-				while ((p = strstr(buffer, dot3)) != NULL) {
-					int taillen = strlen(p) - dot3len;
-					memcpy(p, "/.../", 5);
-					memmove(p + 5, p + dot3len, taillen + 1);
-				}
-			}
-		}
 
 		if (item->util == NULL)
 			item->util = xcalloc(1, sizeof(struct string_list));
@@ -169,60 +158,6 @@ static void read_from_stdin(struct shortlog *log)
 	strbuf_release(&oneline);
 }
 
-struct strset_item {
-	struct hashmap_entry ent;
-	char value[FLEX_ARRAY];
-};
-
-struct strset {
-	struct hashmap map;
-};
-
-#define STRSET_INIT { { NULL } }
-
-static int strset_item_hashcmp(const void *hash_data,
-			       const struct hashmap_entry *entry,
-			       const struct hashmap_entry *entry_or_key,
-			       const void *keydata)
-{
-	const struct strset_item *a, *b;
-
-	a = container_of(entry, const struct strset_item, ent);
-	if (keydata)
-		return strcmp(a->value, keydata);
-
-	b = container_of(entry_or_key, const struct strset_item, ent);
-	return strcmp(a->value, b->value);
-}
-
-/*
- * Adds "str" to the set if it was not already present; returns true if it was
- * already there.
- */
-static int strset_check_and_add(struct strset *ss, const char *str)
-{
-	unsigned int hash = strhash(str);
-	struct strset_item *item;
-
-	if (!ss->map.table)
-		hashmap_init(&ss->map, strset_item_hashcmp, NULL, 0);
-
-	if (hashmap_get_from_hash(&ss->map, hash, str))
-		return 1;
-
-	FLEX_ALLOC_STR(item, value, str);
-	hashmap_entry_init(&item->ent, hash);
-	hashmap_add(&ss->map, &item->ent);
-	return 0;
-}
-
-static void strset_clear(struct strset *ss)
-{
-	if (!ss->map.table)
-		return;
-	hashmap_free_entries(&ss->map, struct strset_item, ent);
-}
-
 static void insert_records_from_trailers(struct shortlog *log,
 					 struct strset *dups,
 					 struct commit *commit,
@@ -253,7 +188,7 @@ static void insert_records_from_trailers(struct shortlog *log,
 		if (!parse_ident(log, &ident, value))
 			value = ident.buf;
 
-		if (strset_check_and_add(dups, value))
+		if (!strset_add(dups, value))
 			continue;
 		insert_one_record(log, value, oneline);
 	}
@@ -291,7 +226,7 @@ void shortlog_add_commit(struct shortlog *log, struct commit *commit)
 				      log->email ? "%aN <%aE>" : "%aN",
 				      &ident, &ctx);
 		if (!HAS_MULTI_BITS(log->groups) ||
-		    !strset_check_and_add(&dups, ident.buf))
+		    strset_add(&dups, ident.buf))
 			insert_one_record(log, ident.buf, oneline_str);
 	}
 	if (log->groups & SHORTLOG_GROUP_COMMITTER) {
@@ -300,7 +235,7 @@ void shortlog_add_commit(struct shortlog *log, struct commit *commit)
 				      log->email ? "%cN <%cE>" : "%cN",
 				      &ident, &ctx);
 		if (!HAS_MULTI_BITS(log->groups) ||
-		    !strset_check_and_add(&dups, ident.buf))
+		    strset_add(&dups, ident.buf))
 			insert_one_record(log, ident.buf, oneline_str);
 	}
 	if (log->groups & SHORTLOG_GROUP_TRAILER) {
@@ -395,7 +330,7 @@ void shortlog_init(struct shortlog *log)
 {
 	memset(log, 0, sizeof(*log));
 
-	read_mailmap(&log->mailmap, &log->common_repo_prefix);
+	read_mailmap(&log->mailmap);
 
 	log->list.strdup_strings = 1;
 	log->wrap = DEFAULT_WRAPLEN;
@@ -413,19 +348,19 @@ int cmd_shortlog(int argc, const char **argv, const char *prefix)
 
 	const struct option options[] = {
 		OPT_BIT('c', "committer", &log.groups,
-			N_("Group by committer rather than author"),
+			N_("group by committer rather than author"),
 			SHORTLOG_GROUP_COMMITTER),
 		OPT_BOOL('n', "numbered", &log.sort_by_number,
 			 N_("sort output according to the number of commits per author")),
 		OPT_BOOL('s', "summary", &log.summary,
-			 N_("Suppress commit descriptions, only provides commit count")),
+			 N_("suppress commit descriptions, only provides commit count")),
 		OPT_BOOL('e', "email", &log.email,
-			 N_("Show the email address of each author")),
+			 N_("show the email address of each author")),
 		OPT_CALLBACK_F('w', NULL, &log, N_("<w>[,<i1>[,<i2>]]"),
-			N_("Linewrap output"), PARSE_OPT_OPTARG,
+			N_("linewrap output"), PARSE_OPT_OPTARG,
 			&parse_wrap_args),
 		OPT_CALLBACK(0, "group", &log, N_("field"),
-			N_("Group by field"), parse_group_option),
+			N_("group by field"), parse_group_option),
 		OPT_END(),
 	};
 

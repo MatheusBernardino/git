@@ -28,7 +28,7 @@ create_commits_in () {
 		shift ||
 		return 1
 	done &&
-	git -C "$repo" update-ref refs/heads/master $oid
+	git -C "$repo" update-ref refs/heads/main $oid
 }
 
 # Format the output of git-push, git-show-ref and other commands to make a
@@ -36,13 +36,12 @@ create_commits_in () {
 # without having to worry about future changes of the commit ID and spaces
 # of the output.  Single quotes are replaced with double quotes, because
 # it is boring to prepare unquoted single quotes in expect text.  We also
-# remove some locale error messages, which break test if we turn on
-# `GIT_TEST_GETTEXT_POISON=true` in order to test unintentional translations
-# on plumbing commands.
+# remove some locale error messages. The emitted human-readable errors are
+# redundant to the more machine-readable output the tests already assert.
 make_user_friendly_and_stable_output () {
 	sed \
 		-e "s/  *\$//" \
-		-e "s/   */ /g" \
+		-e "s/  */ /g" \
 		-e "s/'/\"/g" \
 		-e "s/	/    /g" \
 		-e "s/$A/<COMMIT-A>/g" \
@@ -53,4 +52,24 @@ make_user_friendly_and_stable_output () {
 		-e "s/$(echo $B | cut -c1-7)[0-9a-f]*/<OID-B>/g" \
 		-e "s#To $URL_PREFIX/upstream.git#To <URL/of/upstream.git>#" \
 		-e "/^error: / d"
+}
+
+filter_out_user_friendly_and_stable_output () {
+	make_user_friendly_and_stable_output |
+		sed -n ${1+"$@"}
+}
+
+test_cmp_refs () {
+	indir=
+	if test "$1" = "-C"
+	then
+		shift
+		indir="$1"
+		shift
+	fi
+	indir=${indir:+"$indir"/}
+	cat >show-ref.expect &&
+	git ${indir:+ -C "$indir"} show-ref >show-ref.pristine &&
+	make_user_friendly_and_stable_output <show-ref.pristine >show-ref.filtered &&
+	test_cmp show-ref.expect show-ref.filtered
 }
