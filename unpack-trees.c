@@ -17,6 +17,7 @@
 #include "fsmonitor.h"
 #include "object-store.h"
 #include "fetch-object.h"
+#include "entry.h"
 
 /*
  * Error messages expected by scripts out of plumbing commands such as
