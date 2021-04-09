@@ -751,6 +751,7 @@ void show_log(struct rev_info *opt)
 	ctx.after_subject = extra_headers;
 	ctx.preserve_subject = opt->preserve_subject;
 	ctx.encode_email_headers = opt->encode_email_headers;
+	ctx.check_in_body_patch_breaks = opt->check_in_body_patch_breaks;
 	ctx.reflog_info = opt->reflog_info;
 	ctx.fmt = opt->commit_format;
 	ctx.mailmap = opt->mailmap;

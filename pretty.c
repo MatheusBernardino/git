@@ -5,6 +5,7 @@
 #include "diff.h"
 #include "revision.h"
 #include "string-list.h"
+#include "mailinfo.h"
 #include "mailmap.h"
 #include "log-tree.h"
 #include "notes.h"
@@ -2003,6 +2004,10 @@ void pp_remainder(struct pretty_print_context *pp,
 
 		if (!linelen)
 			break;
+
+		if (pp->check_in_body_patch_breaks && patchbreak(line, linelen))
+			warning("commit message contains a patch break (e.g. '---')\n"
+				"git am might not be able to apply this patch properly.");
 
 		if (is_blank_line(line, &linelen)) {
 			if (first)

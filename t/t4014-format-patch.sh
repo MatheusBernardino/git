@@ -2300,4 +2300,12 @@ test_expect_success 'interdiff: solo-patch' '
 	test_cmp expect actual
 '
 
+test_expect_success 'warn if commit message contains patch breaks' '
+	>foobar &&
+	git add foobar &&
+	GIT_EDITOR="printf \"title\n\n---\" >" git commit &&
+	git format-patch -1 2>stderr &&
+	grep "warning: commit message contains a patch break" stderr
+'
+
 test_done

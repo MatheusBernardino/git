@@ -1842,6 +1842,7 @@ int cmd_format_patch(int argc, const char **argv, const char *prefix)
 	rev.max_parents = 1;
 	rev.diffopt.flags.recursive = 1;
 	rev.subject_prefix = fmt_patch_subject_prefix;
+	rev.check_in_body_patch_breaks = 1;
 	memset(&s_r_opt, 0, sizeof(s_r_opt));
 	s_r_opt.def = "HEAD";
 	s_r_opt.revarg_opt = REVARG_COMMITTISH;

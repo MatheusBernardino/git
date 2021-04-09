@@ -48,7 +48,8 @@ struct pretty_print_context {
 	struct string_list *mailmap;
 	int color;
 	struct ident_split *from_ident;
-	unsigned encode_email_headers:1;
+	unsigned encode_email_headers:1,
+		 check_in_body_patch_breaks:1;
 	struct pretty_print_describe_status *describe_status;
 
 	/*

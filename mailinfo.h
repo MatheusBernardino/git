@@ -43,4 +43,7 @@ void setup_mailinfo(struct mailinfo *);
 int mailinfo(struct mailinfo *, const char *msg, const char *patch);
 void clear_mailinfo(struct mailinfo *);
 
+/* Returns 1 iff line is a valid delimiter between a patch's msg and diff. */
+int patchbreak(const char *line, size_t len);
+
 #endif /* MAILINFO_H */

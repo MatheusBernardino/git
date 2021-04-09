@@ -646,32 +646,32 @@ static void decode_transfer_encoding(struct mailinfo *mi, struct strbuf *line)
 	free(ret);
 }
 
-static inline int patchbreak(const struct strbuf *line)
+int patchbreak(const char *line, size_t len)
 {
 	size_t i;
 
 	/* Beginning of a "diff -" header? */
-	if (starts_with(line->buf, "diff -"))
+	if (starts_with(line, "diff -"))
 		return 1;
 
 	/* CVS "Index: " line? */
-	if (starts_with(line->buf, "Index: "))
+	if (starts_with(line, "Index: "))
 		return 1;
 
 	/*
 	 * "--- <filename>" starts patches without headers
 	 * "---<sp>*" is a manual separator
 	 */
-	if (line->len < 4)
+	if (len < 4)
 		return 0;
 
-	if (starts_with(line->buf, "---")) {
+	if (starts_with(line, "---")) {
 		/* space followed by a filename? */
-		if (line->buf[3] == ' ' && !isspace(line->buf[4]))
+		if (line[3] == ' ' && !isspace(line[4]))
 			return 1;
 		/* Just whitespace? */
-		for (i = 3; i < line->len; i++) {
-			unsigned char c = line->buf[i];
+		for (i = 3; i < len; i++) {
+			unsigned char c = line[i];
 			if (c == '\n')
 				return 1;
 			if (!isspace(c))
@@ -826,7 +826,7 @@ static int handle_commit_msg(struct mailinfo *mi, struct strbuf *line)
 		return 0;
 	}
 
-	if (patchbreak(line)) {
+	if (patchbreak(line->buf, line->len)) {
 		if (mi->message_id)
 			strbuf_addf(&mi->log_message,
 				    "Message-Id: %s\n", mi->message_id);
