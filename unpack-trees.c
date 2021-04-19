@@ -440,16 +440,19 @@ static int check_updates(struct unpack_trees_options *o)
 			if (ce->ce_flags & CE_WT_REMOVE)
 				BUG("both update and delete flags are set on %s",
 				    ce->name);
-			display_progress(progress, ++cnt);
 			ce->ce_flags &= ~CE_UPDATE;
 			if (o->update && !o->dry_run) {
+				size_t last_pc_queue_size = pc_queue_size();
 				errs |= checkout_entry(ce, &state, NULL, NULL);
+				if (last_pc_queue_size == pc_queue_size())
+					display_progress(progress, ++cnt);
 			}
 		}
 	}
-	stop_progress(&progress);
 	if (pc_workers > 1)
-		errs |= run_parallel_checkout(&state, pc_workers, pc_threshold);
+		errs |= run_parallel_checkout(&state, pc_workers, pc_threshold,
+					      progress, &cnt);
+	stop_progress(&progress);
 	errs |= finish_delayed_checkout(&state, NULL);
 	if (o->update)
 		git_attr_set_direction(GIT_ATTR_CHECKIN);
