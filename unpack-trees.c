@@ -18,6 +18,7 @@
 #include "object-store.h"
 #include "fetch-object.h"
 #include "entry.h"
+#include "parallel-checkout.h"
 
 /*
  * Error messages expected by scripts out of plumbing commands such as
@@ -403,7 +404,6 @@ static int check_updates(struct unpack_trees_options *o)
 	if (should_update_submodules() && o->update && !o->dry_run)
 		load_gitmodules_file(index, &state);
 
-	enable_delayed_checkout(&state);
 	if (repository_format_partial_clone && o->update && !o->dry_run) {
 		/*
 		 * Prefetch the objects that are to be checked out in the loop
@@ -427,6 +427,9 @@ static int check_updates(struct unpack_trees_options *o)
 				      to_fetch.oid, to_fetch.nr);
 		oid_array_clear(&to_fetch);
 	}
+
+	enable_delayed_checkout(&state);
+	init_parallel_checkout();
 	for (i = 0; i < index->cache_nr; i++) {
 		struct cache_entry *ce = index->cache[i];
 
@@ -442,6 +445,7 @@ static int check_updates(struct unpack_trees_options *o)
 		}
 	}
 	stop_progress(&progress);
+	errs |= run_parallel_checkout(&state);
 	errs |= finish_delayed_checkout(&state, NULL);
 	if (o->update)
 		git_attr_set_direction(GIT_ATTR_CHECKIN);
