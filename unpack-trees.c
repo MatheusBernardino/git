@@ -972,7 +972,7 @@ static struct cache_entry *create_ce_entry(const struct traverse_info *info,
 	int len = traverse_path_len(info, n);
 	struct cache_entry *ce =
 		is_transient ?
-		make_empty_transient_cache_entry(len) :
+		make_empty_transient_cache_entry(len, NULL) :
 		make_empty_cache_entry(istate, len);
 
 	ce->ce_mode = create_ce_mode(n->mode);
