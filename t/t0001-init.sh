@@ -201,6 +201,16 @@ test_expect_success 'init with init.templatedir set' '
 	test_cmp templatedir-source/file templatedir-set/.git/file
 '
 
+test_expect_success 'init with init.templatedir using ~ expansion' '
+	mkdir -p templatedir-source &&
+	echo Content >templatedir-source/file &&
+	test_config_global init.templatedir "~/templatedir-source" &&
+
+	GIT_TEMPLATE_DIR= NO_SET_GIT_TEMPLATE_DIR=1 \
+		git init templatedir-expansion &&
+	test_cmp templatedir-source/file templatedir-expansion/.git/file
+'
+
 test_expect_success 'init --bare/--shared overrides system/global config' '
 	test_config_global core.bare false &&
 	test_config_global core.sharedRepository 0640 &&
